@@ -51,7 +51,21 @@ export const Missions = {
       btnReplanAi: document.getElementById('btnReplanAi'),
       btnAcceptAi: document.getElementById('btnAcceptAi'),
       btnCloseWeather: document.getElementById('btnCloseWeather'),
-      btnCloseBriefing: document.getElementById('btnCloseBriefing')
+      btnCloseBriefing: document.getElementById('btnCloseBriefing'),
+      // Flight plan modal
+      btnGenerateFp: document.getElementById('btnGenerateFlightPlan'),
+      fpOverlay: document.getElementById('fpModalOverlay'),
+      btnCloseFp: document.getElementById('btnCloseFpModal'),
+      fpFormatCards: document.getElementById('fpFormatCards'),
+      fpOutput: document.getElementById('fpOutput'),
+      fpOutputTitle: document.getElementById('fpOutputTitle'),
+      fpOutputCode: document.getElementById('fpOutputCode'),
+      btnFpBack: document.getElementById('btnFpBack'),
+      btnFpCopy: document.getElementById('btnFpCopy'),
+      btnFpDownload: document.getElementById('btnFpDownload'),
+      fpCopyLabel: document.getElementById('fpCopyLabel'),
+      // Load waypoints
+      btnLoadWaypoints: document.getElementById('btnLoadWaypoints')
     };
     return this._dom;
   },
@@ -76,6 +90,20 @@ export const Missions = {
     d.btnAcceptAi.addEventListener('click', () => this._acceptAiRoute());
     d.btnCloseWeather.addEventListener('click', () => d.aiWeatherPanel.classList.remove('visible'));
     d.btnCloseBriefing.addEventListener('click', () => d.aiBriefingPanel.classList.remove('visible'));
+
+    // Flight plan modal
+    d.btnGenerateFp.addEventListener('click', () => this._openFlightPlanModal());
+    d.btnCloseFp.addEventListener('click', () => this._closeFlightPlanModal());
+    d.fpOverlay.addEventListener('click', (e) => { if (e.target === e.currentTarget) this._closeFlightPlanModal(); });
+    d.btnFpBack.addEventListener('click', () => this._fpShowFormatSelection());
+    d.btnFpCopy.addEventListener('click', () => this._fpCopyToClipboard());
+    d.btnFpDownload.addEventListener('click', () => this._fpDownloadFile());
+    d.fpFormatCards.querySelectorAll('.fp-format-card').forEach(card => {
+      card.addEventListener('click', () => this._fpSelectFormat(card.dataset.format));
+    });
+
+    // Load waypoints from file
+    d.btnLoadWaypoints.addEventListener('click', () => this._loadWaypointsFromFile());
   },
 
   async onEnter() {
@@ -90,9 +118,48 @@ export const Missions = {
     } else if (this._map) {
       google.maps.event.trigger(this._map, 'resize');
     }
+    // Populate drone model dropdown from fleet database
+    await this._populateDroneSelect();
   },
 
   onLeave() { /* no cleanup needed */ },
+
+  async _populateDroneSelect() {
+    const select = document.getElementById('droneModel');
+    if (!select) return;
+    const currentVal = select.value;
+    // Keep placeholder, remove old dynamic options
+    const placeholder = select.querySelector('option[disabled]');
+    select.innerHTML = '';
+    if (placeholder) select.appendChild(placeholder);
+    try {
+      const drones = await window.helios.fleetGetAll();
+      if (drones.length === 0) {
+        const opt = document.createElement('option');
+        opt.value = '';
+        opt.disabled = true;
+        opt.textContent = 'No drones — add one in Fleet';
+        select.appendChild(opt);
+      } else {
+        drones.forEach(d => {
+          const opt = document.createElement('option');
+          opt.value = String(d.id);
+          opt.textContent = `${d.name}${d.model ? ' — ' + d.model : ''}`;
+          opt.dataset.hostname = d.hostname;
+          opt.dataset.droneType = d.drone_type || '';
+          opt.dataset.droneName = d.name;
+          opt.dataset.droneModel = d.model || '';
+          select.appendChild(opt);
+        });
+      }
+      // Restore selection if still valid
+      if (currentVal && select.querySelector(`option[value="${currentVal}"]`)) {
+        select.value = currentVal;
+      }
+    } catch (err) {
+      console.error('Failed to load fleet drones for mission select:', err);
+    }
+  },
 
   /** Called by Theme when theme changes. */
   updateMapStyles() {
@@ -353,7 +420,12 @@ export const Missions = {
       return;
     }
 
-    const droneModel = document.getElementById('droneModel').value;
+    const droneSelect = document.getElementById('droneModel');
+    const selectedOption = droneSelect.options[droneSelect.selectedIndex];
+    const droneId = droneSelect.value;
+    const droneName = selectedOption?.dataset?.droneName || 'Unknown';
+    const droneType = selectedOption?.dataset?.droneType || 'quadcopter';
+    const droneModelName = selectedOption?.dataset?.droneModel || '';
     const takeoffDate = document.getElementById('takeoffDate').value;
     const loadWeight = document.getElementById('loadWeight').value;
     const missionDescription = document.getElementById('missionDescription').value;
@@ -363,7 +435,8 @@ export const Missions = {
     });
 
     const mission = {
-      droneModel, takeoffDate,
+      droneId, droneName, droneType, droneModelName,
+      takeoffDate,
       loadWeight: parseFloat(loadWeight),
       weightUnit: this._unit,
       missionDescription, waypoints,
@@ -418,17 +491,21 @@ export const Missions = {
       throw new Error('Gemini API key not configured. Add your GEMINI_API_KEY to the .env file and restart the app.');
     }
 
-    const droneSpecs = {
-      'helios-x1': { name: 'Helios X1 Recon', maxAltitude: 120, maxSpeed: 65, maxFlightTime: 35, maxPayload: 2.5 },
-      'helios-h4': { name: 'Helios H4 Heavy Lift', maxAltitude: 100, maxSpeed: 45, maxFlightTime: 25, maxPayload: 15 },
-      'helios-s2': { name: 'Helios S2 Survey', maxAltitude: 150, maxSpeed: 55, maxFlightTime: 40, maxPayload: 5 }
+    const typeDefaults = {
+      'quadcopter':  { maxAltitude: 120, maxSpeed: 55, maxFlightTime: 30, maxPayload: 5 },
+      'hexacopter':  { maxAltitude: 120, maxSpeed: 50, maxFlightTime: 28, maxPayload: 8 },
+      'octocopter':  { maxAltitude: 100, maxSpeed: 45, maxFlightTime: 25, maxPayload: 15 },
+      'fixed-wing':  { maxAltitude: 200, maxSpeed: 90, maxFlightTime: 60, maxPayload: 3 },
+      'vtol':        { maxAltitude: 150, maxSpeed: 70, maxFlightTime: 40, maxPayload: 6 },
+      'evtol':       { maxAltitude: 150, maxSpeed: 80, maxFlightTime: 45, maxPayload: 10 }
     };
-    const drone = droneSpecs[mission.droneModel] || droneSpecs['helios-x1'];
+    const specs = typeDefaults[mission.droneType] || typeDefaults['quadcopter'];
+    const droneLine = `${mission.droneName}${mission.droneModelName ? ' (' + mission.droneModelName + ')' : ''} [${mission.droneType}]`;
 
     const prompt = `You are an expert eVTOL drone mission planner. Analyze this mission and provide an optimized flight plan.
 
 MISSION DATA:
-- Drone: ${drone.name} (max altitude: ${drone.maxAltitude}m, max speed: ${drone.maxSpeed}km/h, max flight time: ${drone.maxFlightTime}min, max payload: ${drone.maxPayload}kg)
+- Drone: ${droneLine} (est. max altitude: ${specs.maxAltitude}m, max speed: ${specs.maxSpeed}km/h, max flight time: ${specs.maxFlightTime}min, max payload: ${specs.maxPayload}kg)
 - Scheduled takeoff: ${mission.takeoffDate || 'Not specified'}
 - Payload weight: ${mission.loadWeight} ${mission.weightUnit}
 - Mission description: ${mission.missionDescription || 'General mission'}
@@ -622,5 +699,229 @@ RULES:
     d.mapEl.parentElement.appendChild(toast);
     requestAnimationFrame(() => { requestAnimationFrame(() => toast.classList.add('visible')); });
     setTimeout(() => { toast.classList.remove('visible'); setTimeout(() => toast.remove(), 400); }, 8000);
+  },
+
+  // ── Flight Plan Export ──
+  _fpCurrentFormat: null,
+  _fpCurrentContent: '',
+  _fpCurrentFilename: '',
+
+  _openFlightPlanModal() {
+    if (this._markers.length < 2) {
+      this._showErrorToast('Add at least 2 waypoints to generate a flight plan.');
+      return;
+    }
+    const d = this._getDom();
+    this._fpShowFormatSelection();
+    d.fpOverlay.classList.add('visible');
+  },
+
+  _closeFlightPlanModal() {
+    const d = this._getDom();
+    d.fpOverlay.classList.remove('visible');
+    this._fpCurrentFormat = null;
+    this._fpCurrentContent = '';
+  },
+
+  _fpShowFormatSelection() {
+    const d = this._getDom();
+    d.fpFormatCards.style.display = '';
+    d.fpOutput.style.display = 'none';
+  },
+
+  _fpSelectFormat(format) {
+    this._fpCurrentFormat = format;
+    const d = this._getDom();
+
+    let content, title, filename;
+    if (format === 'ardupilot') {
+      content = this._generateArduPilotWaypoints();
+      title = 'ArduPilot Waypoint File';
+      filename = `helios-mission-${new Date().toISOString().slice(0, 10)}.waypoints`;
+    } else {
+      content = this._generateGeneralCSV();
+      title = 'General Waypoints (CSV)';
+      filename = `helios-mission-${new Date().toISOString().slice(0, 10)}.csv`;
+    }
+
+    this._fpCurrentContent = content;
+    this._fpCurrentFilename = filename;
+
+    d.fpFormatCards.style.display = 'none';
+    d.fpOutput.style.display = '';
+    d.fpOutputTitle.textContent = title;
+    d.fpOutputCode.textContent = content;
+    d.fpCopyLabel.textContent = 'Copy to Clipboard';
+  },
+
+  _generateArduPilotWaypoints() {
+    // QGC WPL 110 format
+    // seq  current  frame  command  p1 p2 p3 p4  lat  lng  alt  autocontinue
+    // Commands: 16=NAV_WAYPOINT, 22=NAV_TAKEOFF, 20=NAV_RETURN_TO_LAUNCH
+    const lines = ['QGC WPL 110'];
+
+    // Line 0: Home position (first marker, ground level)
+    const home = this._markers[0].getPosition();
+    const homeAlt = this._markers[0]._wpAlt || 0;
+    lines.push(`0\t1\t0\t16\t0\t0\t0\t0\t${home.lat().toFixed(7)}\t${home.lng().toFixed(7)}\t${homeAlt.toFixed(6)}\t1`);
+
+    // Line 1: Takeoff command
+    const takeoffAlt = this._markers.length > 1 && this._markers[1]._wpAlt ? this._markers[1]._wpAlt : 20;
+    lines.push(`1\t0\t3\t22\t0.00000000\t0.00000000\t0.00000000\t0.00000000\t0.00000000\t0.00000000\t${takeoffAlt.toFixed(6)}\t1`);
+
+    // Lines 2..N-1: Waypoints (skip first marker which is home/takeoff, skip last if it's RTL)
+    let seq = 2;
+    const lastIdx = this._markers.length - 1;
+    for (let i = 1; i < this._markers.length; i++) {
+      const m = this._markers[i];
+      // If last marker is RTL type, we'll add the RTL command instead
+      if (i === lastIdx && m._wpType === 'rtl') continue;
+      const pos = m.getPosition();
+      const alt = m._wpAlt || 22;
+      lines.push(`${seq}\t0\t3\t16\t0.00000000\t0.00000000\t0.00000000\t0.00000000\t${pos.lat().toFixed(8)}\t${pos.lng().toFixed(8)}\t${alt.toFixed(6)}\t1`);
+      seq++;
+    }
+
+    // Final line: RTL command
+    lines.push(`${seq}\t0\t0\t20\t0.00000000\t0.00000000\t0.00000000\t0.00000000\t0.00000000\t0.00000000\t0.000000\t1`);
+
+    return lines.join('\n');
+  },
+
+  _generateGeneralCSV() {
+    // Standard CSV with headers — importable by most GCS software
+    const headers = 'seq,type,latitude,longitude,altitude_m,label';
+    const rows = this._markers.map((m, i) => {
+      const pos = m.getPosition();
+      const alt = m._wpAlt || (m._wpType === 'takeoff' || m._wpType === 'rtl' ? 0 : 22);
+      const label = m.getTitle().replace(/,/g, ';');
+      return `${i},${m._wpType},${pos.lat().toFixed(8)},${pos.lng().toFixed(8)},${alt},${label}`;
+    });
+
+    // Add summary comment block at the top
+    const dist = this._computeDistance();
+    const distStr = dist >= 1000 ? (dist / 1000).toFixed(2) + ' km' : Math.round(dist) + ' m';
+    const meta = [
+      `# Helios Flight Plan — Generated ${new Date().toISOString()}`,
+      `# Waypoints: ${this._markers.length}`,
+      `# Total Distance: ${distStr}`,
+      '#'
+    ];
+
+    return [...meta, headers, ...rows].join('\n');
+  },
+
+  async _fpCopyToClipboard() {
+    const d = this._getDom();
+    try {
+      await navigator.clipboard.writeText(this._fpCurrentContent);
+      d.fpCopyLabel.textContent = 'Copied!';
+      setTimeout(() => { d.fpCopyLabel.textContent = 'Copy to Clipboard'; }, 2000);
+    } catch (err) {
+      console.error('Copy failed:', err);
+    }
+  },
+
+  async _fpDownloadFile() {
+    const ext = this._fpCurrentFormat === 'ardupilot' ? 'waypoints' : 'csv';
+    const filterName = this._fpCurrentFormat === 'ardupilot' ? 'Waypoint Files' : 'CSV Files';
+    try {
+      const result = await window.helios.saveFile({
+        content: this._fpCurrentContent,
+        defaultName: this._fpCurrentFilename,
+        filters: [{ name: filterName, extensions: [ext] }, { name: 'All Files', extensions: ['*'] }]
+      });
+      if (result.success) {
+        this._closeFlightPlanModal();
+      }
+    } catch (err) {
+      console.error('Download failed:', err);
+    }
+  },
+
+  // ── Load Waypoints from File ──
+  async _loadWaypointsFromFile() {
+    try {
+      const result = await window.helios.openFile({
+        title: 'Load Waypoints',
+        filters: [
+          { name: 'Waypoint Files', extensions: ['waypoints'] },
+          { name: 'All Files', extensions: ['*'] }
+        ]
+      });
+      if (!result.success) return;
+      const waypoints = this._parseWaypointFile(result.content);
+      if (!waypoints || waypoints.length === 0) {
+        this._showErrorToast('No valid waypoints found in the file.');
+        return;
+      }
+      // Clear existing waypoints and add parsed ones
+      this.clearWaypoints();
+      for (const wp of waypoints) {
+        this._addWaypoint(wp.lat, wp.lng, wp.alt);
+      }
+      // Pan map to first waypoint
+      if (this._map && waypoints.length > 0) {
+        this._map.panTo({ lat: waypoints[0].lat, lng: waypoints[0].lng });
+        if (waypoints.length > 1) {
+          const bounds = new google.maps.LatLngBounds();
+          waypoints.forEach(wp => bounds.extend({ lat: wp.lat, lng: wp.lng }));
+          this._map.fitBounds(bounds, 80);
+        }
+      }
+    } catch (err) {
+      console.error('Load waypoints failed:', err);
+      this._showErrorToast('Failed to load waypoint file.');
+    }
+  },
+
+  _parseWaypointFile(content) {
+    // Parse QGC WPL 110 format
+    const lines = content.trim().split(/\r?\n/).filter(l => l.trim().length > 0);
+    if (lines.length < 2) return null;
+
+    // Verify header
+    const header = lines[0].trim();
+    if (!header.startsWith('QGC WPL')) {
+      this._showErrorToast('Invalid file: expected QGC WPL format header.');
+      return null;
+    }
+
+    const waypoints = [];
+    for (let i = 1; i < lines.length; i++) {
+      const parts = lines[i].trim().split(/\t+/);
+      if (parts.length < 12) continue;
+
+      const cmd = parseInt(parts[3]);
+      const lat = parseFloat(parts[8]);
+      const lng = parseFloat(parts[9]);
+      const alt = parseFloat(parts[10]);
+
+      // cmd 16 = NAV_WAYPOINT, 22 = NAV_TAKEOFF, 20 = NAV_RETURN_TO_LAUNCH
+      if (cmd === 20) {
+        // RTL — use home position coordinates if lat/lng are zero
+        if (lat === 0 && lng === 0 && waypoints.length > 0) {
+          waypoints.push({ lat: waypoints[0].lat, lng: waypoints[0].lng, alt: alt || 0 });
+        } else if (lat !== 0 || lng !== 0) {
+          waypoints.push({ lat, lng, alt: alt || 0 });
+        }
+        continue;
+      }
+
+      if (cmd === 22) {
+        // Takeoff — skip if lat/lng are 0 (altitude-only command)
+        if (lat === 0 && lng === 0) continue;
+        waypoints.push({ lat, lng, alt });
+        continue;
+      }
+
+      if (cmd === 16) {
+        // NAV_WAYPOINT — skip if lat/lng are both 0 (placeholder home)
+        if (lat === 0 && lng === 0) continue;
+        waypoints.push({ lat, lng, alt });
+      }
+    }
+
+    return waypoints;
   }
 };

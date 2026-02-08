@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld('helios', {
   maximize: () => ipcRenderer.send('window-maximize'),
   close: () => ipcRenderer.send('window-close'),
   exportPdf: () => ipcRenderer.invoke('export-pdf'),
+  saveFile: (opts) => ipcRenderer.invoke('save-file', opts),
+  openFile: (opts) => ipcRenderer.invoke('open-file', opts),
   isElectron: true,
 
   // Fleet connection test

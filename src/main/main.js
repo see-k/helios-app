@@ -94,6 +94,36 @@ ipcMain.handle('export-pdf', async () => {
   }
 });
 
+ipcMain.handle('open-file', async (event, { title, filters }) => {
+  try {
+    const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+      title: title || 'Open File',
+      filters: filters || [{ name: 'All Files', extensions: ['*'] }],
+      properties: ['openFile']
+    });
+    if (canceled || !filePaths.length) return { success: false, reason: 'cancelled' };
+    const content = fs.readFileSync(filePaths[0], 'utf-8');
+    return { success: true, path: filePaths[0], content };
+  } catch (err) {
+    return { success: false, reason: err.message };
+  }
+});
+
+ipcMain.handle('save-file', async (event, { content, defaultName, filters }) => {
+  try {
+    const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+      title: 'Save File',
+      defaultPath: defaultName || 'file.txt',
+      filters: filters || [{ name: 'All Files', extensions: ['*'] }]
+    });
+    if (canceled || !filePath) return { success: false, reason: 'cancelled' };
+    fs.writeFileSync(filePath, content, 'utf-8');
+    return { success: true, path: filePath };
+  } catch (err) {
+    return { success: false, reason: err.message };
+  }
+});
+
 // ── Fleet / Drone connection test ──
 ipcMain.handle('fleet-test-connection', async (event, hostname) => {
   const http = require('http');
