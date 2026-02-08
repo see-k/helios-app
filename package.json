@@ -18,21 +18,35 @@
     },
     "mac": {
       "category": "public.app-category.utilities",
-      "target": ["dmg", "zip"]
+      "target": [
+        "dmg",
+        "zip"
+      ]
     },
     "win": {
-      "target": ["nsis", "portable"]
+      "target": [
+        "nsis",
+        "portable"
+      ]
     },
     "files": [
       "src/**/*",
       "assets/**/*"
     ]
   },
-  "keywords": ["drone", "evtol", "helios", "electron"],
+  "keywords": [
+    "drone",
+    "evtol",
+    "helios",
+    "electron"
+  ],
   "author": "Helios Team",
   "license": "MIT",
   "devDependencies": {
     "electron": "^33.0.0",
     "electron-builder": "^25.0.0"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.4"
   }
 }

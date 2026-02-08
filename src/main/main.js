@@ -1,6 +1,9 @@
 const { app, BrowserWindow, ipcMain, nativeTheme } = require('electron');
 const path = require('path');
 
+// Load .env from project root
+require('dotenv').config({ path: path.join(__dirname, '../../.env') });
+
 let mainWindow;
 
 function createWindow() {
@@ -42,6 +45,15 @@ ipcMain.handle('get-theme', () => {
 ipcMain.handle('toggle-theme', (event, theme) => {
   nativeTheme.themeSource = theme;
   return theme;
+});
+
+ipcMain.handle('get-env', (event, key) => {
+  // Only expose whitelisted keys
+  const allowed = ['GOOGLE_MAPS_API_KEY'];
+  if (allowed.includes(key)) {
+    return process.env[key] || '';
+  }
+  return '';
 });
 
 ipcMain.on('window-minimize', () => {
