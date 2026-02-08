@@ -1,0 +1,120 @@
+/* ============================================
+   HELIOS THEME - Light & Dark Mode
+   Liquid Glass Design System
+   ============================================ */
+
+:root {
+  /* === Typography === */
+  --font-primary: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+
+  /* === Sizing === */
+  --nav-width: 64px;
+  --titlebar-height: 52px;
+
+  /* === Transitions === */
+  --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-medium: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow: 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* =====================
+   DARK THEME (Default)
+   ===================== */
+[data-theme="dark"] {
+  --bg-primary: #0a0a0f;
+  --bg-secondary: #12121a;
+  --bg-tertiary: #1a1a25;
+
+  /* Glass */
+  --glass-bg: rgba(255, 255, 255, 0.04);
+  --glass-bg-hover: rgba(255, 255, 255, 0.08);
+  --glass-bg-active: rgba(255, 255, 255, 0.12);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-border-hover: rgba(255, 255, 255, 0.15);
+  --glass-border-active: rgba(255, 255, 255, 0.22);
+  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  --glass-shadow-hover: 0 12px 48px rgba(0, 0, 0, 0.5);
+  --glass-blur: 24px;
+  --glass-inner-glow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --glass-outer-glow: 0 0 0 1px rgba(255, 255, 255, 0.04);
+
+  /* Text */
+  --text-primary: rgba(255, 255, 255, 0.95);
+  --text-secondary: rgba(255, 255, 255, 0.6);
+  --text-tertiary: rgba(255, 255, 255, 0.35);
+  --text-accent: #60a5fa;
+
+  /* Accent */
+  --accent-primary: #3b82f6;
+  --accent-primary-rgb: 59, 130, 246;
+  --accent-glow: rgba(59, 130, 246, 0.25);
+  --accent-glow-strong: rgba(59, 130, 246, 0.4);
+
+  /* Overlay */
+  --overlay-gradient: linear-gradient(135deg, rgba(10, 10, 15, 0.3) 0%, rgba(10, 10, 15, 0.6) 100%);
+  --model-overlay: linear-gradient(180deg, 
+    rgba(10, 10, 15, 0.2) 0%, 
+    rgba(10, 10, 15, 0.1) 30%,
+    rgba(10, 10, 15, 0.1) 60%,
+    rgba(10, 10, 15, 0.5) 100%
+  );
+
+  /* Nav */
+  --nav-indicator: var(--accent-primary);
+  --tooltip-bg: rgba(20, 20, 30, 0.95);
+  --tooltip-border: rgba(255, 255, 255, 0.1);
+
+  /* Ambient */
+  --ambient-glow: rgba(30, 58, 95, 0.35);
+}
+
+/* =====================
+   LIGHT THEME
+   ===================== */
+[data-theme="light"] {
+  --bg-primary: #f0f2f5;
+  --bg-secondary: #e8eaed;
+  --bg-tertiary: #ffffff;
+
+  /* Glass */
+  --glass-bg: rgba(255, 255, 255, 0.45);
+  --glass-bg-hover: rgba(255, 255, 255, 0.6);
+  --glass-bg-active: rgba(255, 255, 255, 0.75);
+  --glass-border: rgba(255, 255, 255, 0.5);
+  --glass-border-hover: rgba(255, 255, 255, 0.7);
+  --glass-border-active: rgba(255, 255, 255, 0.85);
+  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
+  --glass-shadow-hover: 0 12px 48px rgba(0, 0, 0, 0.12);
+  --glass-blur: 24px;
+  --glass-inner-glow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  --glass-outer-glow: 0 0 0 1px rgba(255, 255, 255, 0.3);
+
+  /* Text */
+  --text-primary: rgba(0, 0, 0, 0.87);
+  --text-secondary: rgba(0, 0, 0, 0.55);
+  --text-tertiary: rgba(0, 0, 0, 0.3);
+  --text-accent: #2563eb;
+
+  /* Accent */
+  --accent-primary: #2563eb;
+  --accent-primary-rgb: 37, 99, 235;
+  --accent-glow: rgba(37, 99, 235, 0.15);
+  --accent-glow-strong: rgba(37, 99, 235, 0.3);
+
+  /* Overlay */
+  --overlay-gradient: linear-gradient(135deg, rgba(240, 242, 245, 0.2) 0%, rgba(240, 242, 245, 0.5) 100%);
+  --model-overlay: linear-gradient(180deg, 
+    rgba(240, 242, 245, 0.15) 0%, 
+    rgba(240, 242, 245, 0.05) 30%,
+    rgba(240, 242, 245, 0.05) 60%,
+    rgba(240, 242, 245, 0.4) 100%
+  );
+
+  /* Nav */
+  --nav-indicator: var(--accent-primary);
+  --tooltip-bg: rgba(255, 255, 255, 0.95);
+  --tooltip-border: rgba(0, 0, 0, 0.08);
+
+  /* Ambient */
+  --ambient-glow: rgba(100, 140, 200, 0.12);
+}

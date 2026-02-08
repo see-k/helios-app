@@ -1,0 +1,38 @@
+{
+  "name": "helios-app",
+  "version": "1.0.0",
+  "description": "Helios - Professional eVTOL Drone Application",
+  "main": "src/main/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "build:mac": "electron-builder --mac",
+    "build:win": "electron-builder --win",
+    "build:web": "mkdir -p dist/web && cp -r src/renderer/* dist/web/"
+  },
+  "build": {
+    "appId": "com.helios.app",
+    "productName": "Helios",
+    "directories": {
+      "output": "dist"
+    },
+    "mac": {
+      "category": "public.app-category.utilities",
+      "target": ["dmg", "zip"]
+    },
+    "win": {
+      "target": ["nsis", "portable"]
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*"
+    ]
+  },
+  "keywords": ["drone", "evtol", "helios", "electron"],
+  "author": "Helios Team",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0"
+  }
+}

@@ -1,0 +1,85 @@
+/* ============================================
+   LIQUID GLASS - Core glass morphism system
+   ============================================ */
+
+/* Base glass effect */
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+  box-shadow: 
+    var(--glass-shadow),
+    var(--glass-inner-glow),
+    var(--glass-outer-glow);
+  transition: 
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-medium),
+    transform var(--transition-fast);
+}
+
+.glass:hover {
+  background: var(--glass-bg-hover);
+  border-color: var(--glass-border-hover);
+  box-shadow: 
+    var(--glass-shadow-hover),
+    var(--glass-inner-glow),
+    var(--glass-outer-glow);
+}
+
+.glass.active,
+.glass:active {
+  background: var(--glass-bg-active);
+  border-color: var(--glass-border-active);
+}
+
+/* Liquid glass shimmer effect */
+.glass::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.05) 0%,
+    transparent 40%,
+    transparent 60%,
+    rgba(255, 255, 255, 0.02) 100%
+  );
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--transition-medium);
+}
+
+.glass:hover::before {
+  opacity: 1;
+}
+
+/* Glass pill shape */
+.glass-pill {
+  border-radius: 999px;
+}
+
+/* Glass rounded */
+.glass-rounded {
+  border-radius: 20px;
+}
+
+/* Glass card */
+.glass-card {
+  border-radius: 16px;
+}
+
+/* Accent glow modifier */
+.glass-accent {
+  border-color: rgba(var(--accent-primary-rgb), 0.2);
+}
+
+.glass-accent:hover {
+  border-color: rgba(var(--accent-primary-rgb), 0.35);
+  box-shadow: 
+    var(--glass-shadow-hover),
+    var(--glass-inner-glow),
+    0 0 20px rgba(var(--accent-primary-rgb), 0.1);
+}

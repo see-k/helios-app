@@ -1,0 +1,229 @@
+/* ============================================
+   DASHBOARD - Hero section & action pills
+   ============================================ */
+
+/* Hero Section */
+.hero-section {
+  margin-bottom: 40px;
+  pointer-events: none;
+}
+
+.hero-text {
+  max-width: 500px;
+}
+
+.hero-title {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 16px;
+}
+
+.hero-title-line {
+  font-size: 56px;
+  font-weight: 700;
+  letter-spacing: 8px;
+  line-height: 1.1;
+  background: linear-gradient(
+    135deg,
+    var(--text-primary) 0%,
+    var(--text-secondary) 100%
+  );
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.hero-subtitle {
+  font-size: 16px;
+  font-weight: 400;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  color: var(--text-accent);
+  margin-top: 4px;
+  opacity: 0.85;
+}
+
+.hero-description {
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  font-weight: 300;
+  max-width: 420px;
+}
+
+/* Dashboard Pills */
+.dashboard-pills {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.pill-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 20px 24px;
+  min-width: 160px;
+  max-width: 200px;
+  border: none;
+  border-radius: 20px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+  box-shadow: 
+    var(--glass-shadow),
+    var(--glass-inner-glow),
+    var(--glass-outer-glow);
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font-primary);
+  transition: 
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-medium),
+    transform var(--transition-fast);
+  outline: none;
+  overflow: hidden;
+}
+
+/* Liquid glass shimmer on pills */
+.pill-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.06) 0%,
+    transparent 40%,
+    transparent 60%,
+    rgba(255, 255, 255, 0.03) 100%
+  );
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--transition-medium);
+}
+
+.pill-card:hover::before {
+  opacity: 1;
+}
+
+.pill-card:hover {
+  background: var(--glass-bg-hover);
+  border-color: var(--glass-border-hover);
+  box-shadow: 
+    var(--glass-shadow-hover),
+    var(--glass-inner-glow),
+    0 0 20px rgba(var(--accent-primary-rgb), 0.06);
+  transform: translateY(-2px);
+}
+
+.pill-card:active {
+  transform: translateY(0);
+  background: var(--glass-bg-active);
+}
+
+.pill-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  background: rgba(var(--accent-primary-rgb), 0.1);
+  color: var(--accent-primary);
+  transition: 
+    background var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+.pill-card:hover .pill-icon {
+  background: rgba(var(--accent-primary-rgb), 0.18);
+  transform: scale(1.05);
+}
+
+.pill-icon svg {
+  width: 18px;
+  height: 18px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.pill-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: 0.2px;
+}
+
+.pill-description {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+/* Theme Toggle Button */
+.theme-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 12px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--glass-border);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: 
+    background var(--transition-fast),
+    color var(--transition-fast),
+    border-color var(--transition-fast),
+    transform var(--transition-fast);
+  -webkit-app-region: no-drag;
+  outline: none;
+}
+
+.theme-toggle:hover {
+  background: var(--glass-bg-hover);
+  border-color: var(--glass-border-hover);
+  color: var(--text-primary);
+  transform: scale(1.05);
+}
+
+.theme-toggle:active {
+  transform: scale(0.95);
+}
+
+.theme-toggle svg {
+  width: 18px;
+  height: 18px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: opacity var(--transition-fast), transform var(--transition-medium);
+}
+
+/* Dark mode: show moon, hide sun */
+[data-theme="dark"] .icon-sun {
+  display: none;
+}
+
+[data-theme="dark"] .icon-moon {
+  display: block;
+}
+
+/* Light mode: show sun, hide moon */
+[data-theme="light"] .icon-sun {
+  display: block;
+}
+
+[data-theme="light"] .icon-moon {
+  display: none;
+}
