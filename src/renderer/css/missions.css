@@ -932,8 +932,18 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
 }
 
 .weather-card-icon {
-  font-size: 20px;
-  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent-primary);
+  opacity: 0.85;
+}
+
+.weather-card-icon svg {
+  width: 22px;
+  height: 22px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .weather-card-value {

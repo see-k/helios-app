@@ -292,9 +292,19 @@
 }
 
 .dv-telem-icon {
-  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   margin-bottom: 4px;
-  line-height: 1;
+  color: var(--accent-primary);
+  opacity: 0.85;
+}
+
+.dv-telem-icon svg {
+  width: 18px;
+  height: 18px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .dv-telem-value {
@@ -383,8 +393,18 @@
 }
 
 .dv-weather-icon {
-  font-size: 18px;
-  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent-primary);
+  opacity: 0.85;
+}
+
+.dv-weather-icon svg {
+  width: 20px;
+  height: 20px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .dv-weather-value {

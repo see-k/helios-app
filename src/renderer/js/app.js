@@ -860,31 +860,39 @@ RULES:
     },
 
     _weatherCodeToInfo(code) {
-      // WMO Weather interpretation codes
+      // WMO Weather interpretation codes — monochrome SVG icons
+      const svgSun = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="20" height="20"><path d="M12 3v2m0 14v2m9-9h-2M5 12H3m15.364 6.364l-1.414-1.414M7.05 7.05L5.636 5.636m12.728 0l-1.414 1.414M7.05 16.95l-1.414 1.414M12 8a4 4 0 100 8 4 4 0 000-8z"/></svg>';
+      const svgPartCloud = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="20" height="20"><path d="M2.25 15a4.5 4.5 0 004.5 4.5H18a3.75 3.75 0 001.332-7.257 3 3 0 00-3.758-3.848 5.25 5.25 0 00-10.233 2.33A4.502 4.502 0 002.25 15z"/></svg>';
+      const svgCloud = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="20" height="20"><path d="M2.25 15a4.5 4.5 0 004.5 4.5H18a3.75 3.75 0 001.332-7.257 3 3 0 00-3.758-3.848 5.25 5.25 0 00-10.233 2.33A4.502 4.502 0 002.25 15z"/></svg>';
+      const svgFog = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="20" height="20"><path d="M3.5 12h17M3.5 8h13M3.5 16h10"/></svg>';
+      const svgRain = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="20" height="20"><path d="M2.25 15a4.5 4.5 0 004.5 4.5H18a3.75 3.75 0 001.332-7.257 3 3 0 00-3.758-3.848 5.25 5.25 0 00-10.233 2.33A4.502 4.502 0 002.25 15z"/><path d="M8 19v2m4-2v2m4-2v2" stroke-linecap="round"/></svg>';
+      const svgSnow = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="20" height="20"><path d="M12 3v18m-6-9h12M6.34 6.34l11.32 11.32m0-11.32L6.34 17.66"/></svg>';
+      const svgStorm = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="20" height="20"><path d="M2.25 15a4.5 4.5 0 004.5 4.5H18a3.75 3.75 0 001.332-7.257 3 3 0 00-3.758-3.848 5.25 5.25 0 00-10.233 2.33A4.502 4.502 0 002.25 15z"/><path d="M13 15l-2 5 4-3-2 5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
       const map = {
-        0: { icon: '☀️', label: 'Clear Sky' },
-        1: { icon: '🌤️', label: 'Mainly Clear' },
-        2: { icon: '⛅', label: 'Partly Cloudy' },
-        3: { icon: '☁️', label: 'Overcast' },
-        45: { icon: '🌫️', label: 'Fog' },
-        48: { icon: '🌫️', label: 'Rime Fog' },
-        51: { icon: '🌦️', label: 'Light Drizzle' },
-        53: { icon: '🌦️', label: 'Drizzle' },
-        55: { icon: '🌧️', label: 'Heavy Drizzle' },
-        61: { icon: '🌧️', label: 'Light Rain' },
-        63: { icon: '🌧️', label: 'Rain' },
-        65: { icon: '🌧️', label: 'Heavy Rain' },
-        71: { icon: '🌨️', label: 'Light Snow' },
-        73: { icon: '🌨️', label: 'Snow' },
-        75: { icon: '❄️', label: 'Heavy Snow' },
-        80: { icon: '🌦️', label: 'Rain Showers' },
-        81: { icon: '🌧️', label: 'Moderate Showers' },
-        82: { icon: '⛈️', label: 'Violent Showers' },
-        95: { icon: '⛈️', label: 'Thunderstorm' },
-        96: { icon: '⛈️', label: 'T-Storm w/ Hail' },
-        99: { icon: '⛈️', label: 'Severe T-Storm' }
+        0: { icon: svgSun, label: 'Clear Sky' },
+        1: { icon: svgSun, label: 'Mainly Clear' },
+        2: { icon: svgPartCloud, label: 'Partly Cloudy' },
+        3: { icon: svgCloud, label: 'Overcast' },
+        45: { icon: svgFog, label: 'Fog' },
+        48: { icon: svgFog, label: 'Rime Fog' },
+        51: { icon: svgRain, label: 'Light Drizzle' },
+        53: { icon: svgRain, label: 'Drizzle' },
+        55: { icon: svgRain, label: 'Heavy Drizzle' },
+        61: { icon: svgRain, label: 'Light Rain' },
+        63: { icon: svgRain, label: 'Rain' },
+        65: { icon: svgRain, label: 'Heavy Rain' },
+        71: { icon: svgSnow, label: 'Light Snow' },
+        73: { icon: svgSnow, label: 'Snow' },
+        75: { icon: svgSnow, label: 'Heavy Snow' },
+        80: { icon: svgRain, label: 'Rain Showers' },
+        81: { icon: svgRain, label: 'Moderate Showers' },
+        82: { icon: svgStorm, label: 'Violent Showers' },
+        95: { icon: svgStorm, label: 'Thunderstorm' },
+        96: { icon: svgStorm, label: 'T-Storm w/ Hail' },
+        99: { icon: svgStorm, label: 'Severe T-Storm' }
       };
-      return map[code] || { icon: '🌡️', label: 'Unknown' };
+      return map[code] || { icon: svgCloud, label: 'Unknown' };
     },
 
     _windDirToCompass(deg) {
@@ -984,6 +992,11 @@ RULES:
       const compass = this._windDirToCompass(w.windDirection || 0);
       const visKm = w.visibility != null ? (w.visibility / 1000).toFixed(1) : '—';
 
+      const svgThermo = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="20" height="20"><path d="M12 9a4 4 0 00-2 7.465V18a2 2 0 104 0v-1.535A4.001 4.001 0 0012 9z"/><path d="M12 3v6" stroke-linecap="round"/></svg>';
+      const svgWind = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="20" height="20"><path d="M3 8h12a3 3 0 100-3M3 16h10a3 3 0 110 3M3 12h16a3 3 0 100-3" stroke-linecap="round"/></svg>';
+      const svgCloudRain = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="20" height="20"><path d="M2.25 15a4.5 4.5 0 004.5 4.5H18a3.75 3.75 0 001.332-7.257 3 3 0 00-3.758-3.848 5.25 5.25 0 00-10.233 2.33A4.502 4.502 0 002.25 15z"/><path d="M8 19v2m4-2v2m4-2v2" stroke-linecap="round"/></svg>';
+      const svgEye = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="20" height="20"><path d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5s8.577 3.01 9.963 7.178a1.014 1.014 0 010 .639C20.577 16.49 16.64 19.5 12 19.5s-8.577-3.01-9.963-7.178z"/><circle cx="12" cy="12" r="3"/></svg>';
+
       d.aiWeatherBody.innerHTML = `
         <div class="weather-card weather-card-wide">
           <span class="weather-card-icon">${info.icon}</span>
@@ -991,22 +1004,22 @@ RULES:
           <span class="weather-card-label">Conditions</span>
         </div>
         <div class="weather-card">
-          <span class="weather-card-icon">🌡️</span>
+          <span class="weather-card-icon">${svgThermo}</span>
           <span class="weather-card-value">${w.temperature != null ? w.temperature + '°C' : '—'}</span>
           <span class="weather-card-label">Temp</span>
         </div>
         <div class="weather-card">
-          <span class="weather-card-icon">💨</span>
+          <span class="weather-card-icon">${svgWind}</span>
           <span class="weather-card-value">${w.windSpeed != null ? w.windSpeed + ' km/h' : '—'}</span>
           <span class="weather-card-label">Wind ${compass}</span>
         </div>
         <div class="weather-card">
-          <span class="weather-card-icon">🌧️</span>
+          <span class="weather-card-icon">${svgCloudRain}</span>
           <span class="weather-card-value">${w.precipitationProb != null ? w.precipitationProb + '%' : '—'}</span>
           <span class="weather-card-label">Rain</span>
         </div>
         <div class="weather-card">
-          <span class="weather-card-icon">👁️</span>
+          <span class="weather-card-icon">${svgEye}</span>
           <span class="weather-card-value">${visKm} km</span>
           <span class="weather-card-label">Visibility</span>
         </div>`;
@@ -1761,7 +1774,7 @@ RULES:
         const visKm = data.hourly.visibility?.[idx] != null ? (data.hourly.visibility[idx] / 1000).toFixed(1) : '—';
 
         const d = this._getDom();
-        d.weatherIcon.textContent = info.icon;
+        d.weatherIcon.innerHTML = info.icon;
         d.weatherCondition.textContent = info.label;
         d.weatherTemp.textContent = data.hourly.temperature_2m?.[idx] != null ? data.hourly.temperature_2m[idx] + '°C' : '—';
         d.weatherWind.textContent = data.hourly.windspeed_10m?.[idx] != null ? data.hourly.windspeed_10m[idx] + ' km/h' : '—';
