@@ -532,6 +532,14 @@ textarea:focus {
   margin-top: 2px;
 }
 
+/* Form actions */
+.mission-form-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: auto;
+}
+
 /* Submit */
 .form-submit {
   display: flex;
@@ -540,7 +548,7 @@ textarea:focus {
   gap: 8px;
   width: 100%;
   padding: 14px;
-  margin-top: auto;
+  margin-top: 0;
   border: none;
   border-radius: 14px;
   background: var(--accent-primary);
@@ -567,6 +575,20 @@ textarea:focus {
 .form-submit:active {
   transform: translateY(0);
   filter: brightness(0.95);
+}
+
+.form-submit-secondary {
+  border: 1px solid var(--glass-border);
+  background: transparent;
+  color: var(--text-primary);
+  box-shadow: none;
+}
+
+.form-submit-secondary:hover {
+  border-color: var(--glass-border-hover);
+  background: var(--glass-bg-hover);
+  box-shadow: none;
+  filter: none;
 }
 
 /* Date input styling */

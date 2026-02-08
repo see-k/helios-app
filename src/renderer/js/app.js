@@ -201,6 +201,7 @@
         unitToggle: document.getElementById('unitToggle'),
         form: document.getElementById('missionForm'),
         btnSubmit: document.getElementById('btnStartMission'),
+        btnSimulate: document.getElementById('btnSimulateMission'),
         formPanel: document.getElementById('missionFormPanel'),
         btnCollapse: document.getElementById('btnCollapseForm'),
         btnExpand: document.getElementById('btnExpandForm'),
@@ -239,6 +240,7 @@
         e.preventDefault();
         this._submitMission();
       });
+      d.btnSimulate.addEventListener('click', () => this._simulateMission());
       // AI panel controls
       d.btnDismissAi.addEventListener('click', () => this._dismissAiRoute());
       d.btnReplanAi.addEventListener('click', () => this._replanMission());
@@ -405,7 +407,7 @@
     },
 
     // ── Waypoint Management ──
-    _addWaypoint(lat, lng) {
+    _addWaypoint(lat, lng, alt = null) {
       const id = ++this._waypointIdSeq;
       const count = this._markers.length;
 
@@ -435,6 +437,7 @@
       marker._wpId = id;
       marker._wpType = type;
       marker._wpIndex = count;
+      marker._wpAlt = Number.isFinite(alt) ? Math.round(alt) : null;
 
       // Drag updates
       marker.addListener('dragend', () => this._refreshRoute());
@@ -616,6 +619,31 @@
       if (this._map) {
         setTimeout(() => google.maps.event.trigger(this._map, 'resize'), 360);
       }
+    },
+
+    _buildSimulationWaypoints() {
+      return this._markers.map((m, i) => {
+        const p = m.getPosition();
+        const type = m._wpType;
+        const defaultAlt = (type === 'takeoff' || type === 'rtl') ? 0 : 80;
+        return {
+          lat: p.lat(),
+          lng: p.lng(),
+          type,
+          label: m.getTitle(),
+          alt: Number.isFinite(m._wpAlt) ? Math.max(0, Math.round(m._wpAlt)) : defaultAlt
+        };
+      });
+    },
+
+    _simulateMission() {
+      if (this._markers.length < 2) {
+        alert('Add at least 2 waypoints to simulate a mission.');
+        return;
+      }
+      const missionWaypoints = this._buildSimulationWaypoints();
+      DroneView.setMissionWaypoints(missionWaypoints);
+      Navigation.setActive('droneview');
     },
 
     // ── Form Submit ──
@@ -1070,7 +1098,7 @@ RULES:
 
       // Re-add waypoints from AI result
       for (const wp of this._lastAiResult.optimizedWaypoints) {
-        this._addWaypoint(wp.lat, wp.lng);
+        this._addWaypoint(wp.lat, wp.lng, wp.altitude_m);
       }
       this._lastAiResult = null;
     },
@@ -1203,6 +1231,119 @@ RULES:
       return this._dom;
     },
 
+    _normalizeMissionWaypoints(waypoints) {
+      if (!Array.isArray(waypoints)) return [];
+      return waypoints.map((wp, i, arr) => {
+        const lat = Number(wp.lat);
+        const lng = Number(wp.lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+        const type = i === 0 ? 'takeoff' : (i === arr.length - 1 ? 'rtl' : 'waypoint');
+        const fallbackLabel = type === 'takeoff' ? 'Take Off' : type === 'rtl' ? 'Return to Launch' : `Waypoint ${i}`;
+        const rawAlt = Number(wp.alt);
+        const defaultAlt = (type === 'takeoff' || type === 'rtl') ? 0 : 80;
+
+        return {
+          lat,
+          lng,
+          type,
+          label: (typeof wp.label === 'string' && wp.label.trim()) ? wp.label.trim() : fallbackLabel,
+          alt: Number.isFinite(rawAlt) ? Math.max(0, Math.round(rawAlt)) : defaultAlt
+        };
+      }).filter(Boolean);
+    },
+
+    _resetTelemetryToMissionStart() {
+      const launch = this._missionWaypoints[0];
+      if (!launch) return;
+      this._telemetry = {
+        ...this._telemetry,
+        altitude: Math.round(launch.alt || 0),
+        speed: 0,
+        heading: 0,
+        battery: 100,
+        lat: launch.lat,
+        lng: launch.lng
+      };
+    },
+
+    _rebuildWaypointMarkers() {
+      this._waypointMarkers.forEach(m => m.setMap(null));
+      this._waypointMarkers = [];
+
+      this._missionWaypoints.forEach((wp, i) => {
+        const type = wp.type;
+        const label = type === 'takeoff' ? 'T' : type === 'rtl' ? 'R' : String(i);
+        const marker = new google.maps.Marker({
+          position: { lat: wp.lat, lng: wp.lng },
+          map: this._map,
+          icon: {
+            url: Missions._createMarkerIcon(label, type),
+            scaledSize: new google.maps.Size(28, 37),
+            anchor: new google.maps.Point(14, 37)
+          },
+          title: wp.label,
+          zIndex: 50 + i
+        });
+        this._waypointMarkers.push(marker);
+      });
+    },
+
+    _applyMissionWaypointsToMap({ restartSimulation = false } = {}) {
+      if (!this._map || this._missionWaypoints.length < 2) return;
+
+      if (this._simInterval) {
+        clearInterval(this._simInterval);
+        this._simInterval = null;
+      }
+
+      this._missionComplete = false;
+      this._simIndex = 0;
+      this._simFraction = 0;
+      this._resetTelemetryToMissionStart();
+
+      if (this._routePolyline) {
+        this._routePolyline.setPath(this._missionWaypoints.map(w => ({ lat: w.lat, lng: w.lng })));
+      }
+      if (this._trailPolyline) {
+        this._trailPolyline.setPath([]);
+      }
+
+      this._rebuildWaypointMarkers();
+
+      const launch = this._missionWaypoints[0];
+      if (this._droneMarker && launch) {
+        this._droneMarker.setPosition({ lat: launch.lat, lng: launch.lng });
+      }
+      if (this._map && launch) {
+        this._map.panTo({ lat: launch.lat, lng: launch.lng });
+      }
+
+      const d = this._getDom();
+      d.missionCompleteOverlay.classList.remove('visible');
+      this._renderWaypointList();
+      this._updateTelemetryUI();
+      this._updateProgress();
+      this._updateWaypointStatuses();
+      this._fetchLiveWeather();
+
+      if (restartSimulation) {
+        this._startSimulation();
+      }
+    },
+
+    setMissionWaypoints(waypoints) {
+      const normalized = this._normalizeMissionWaypoints(waypoints);
+      if (normalized.length < 2) return;
+      this._missionWaypoints = normalized;
+      this._resetTelemetryToMissionStart();
+
+      if (this._mapsReady && this._map) {
+        const shouldRestart = state.activePage === 'droneview';
+        this._applyMissionWaypointsToMap({ restartSimulation: shouldRestart });
+      }
+    },
+
     init() {
       const d = this._getDom();
       d.btnFlightAnalysis.addEventListener('click', () => this._requestFlightAnalysis());
@@ -1317,28 +1458,12 @@ RULES:
         geodesic: true
       });
 
-      // Waypoint markers
-      this._missionWaypoints.forEach((wp, i) => {
-        const len = this._missionWaypoints.length;
-        let type = wp.type;
-        let label = type === 'takeoff' ? 'T' : type === 'rtl' ? 'R' : String(i);
-        const marker = new google.maps.Marker({
-          position: { lat: wp.lat, lng: wp.lng },
-          map: this._map,
-          icon: {
-            url: Missions._createMarkerIcon(label, type),
-            scaledSize: new google.maps.Size(28, 37),
-            anchor: new google.maps.Point(14, 37)
-          },
-          title: wp.label,
-          zIndex: 50 + i
-        });
-        this._waypointMarkers.push(marker);
-      });
+      this._rebuildWaypointMarkers();
 
       // Drone marker
+      const launch = this._missionWaypoints[0] || { lat: 37.7749, lng: -122.4194 };
       this._droneMarker = new google.maps.Marker({
-        position: { lat: this._missionWaypoints[0].lat, lng: this._missionWaypoints[0].lng },
+        position: { lat: launch.lat, lng: launch.lng },
         map: this._map,
         icon: {
           url: this._createDroneIcon(),
@@ -1349,7 +1474,9 @@ RULES:
         zIndex: 1000
       });
 
+      this._resetTelemetryToMissionStart();
       this._renderWaypointList();
+      this._updateTelemetryUI();
       this._startSimulation();
       this._fetchLiveWeather();
     },
@@ -1927,26 +2054,7 @@ RULES:
         if (this._routePolyline) {
           this._routePolyline.setPath(this._missionWaypoints.map(w => ({ lat: w.lat, lng: w.lng })));
         }
-        // Rebuild waypoint markers
-        this._waypointMarkers.forEach(m => m.setMap(null));
-        this._waypointMarkers = [];
-        this._missionWaypoints.forEach((wp, i) => {
-          const len = this._missionWaypoints.length;
-          let type = wp.type;
-          let label = type === 'takeoff' ? 'T' : type === 'rtl' ? 'R' : String(i);
-          const marker = new google.maps.Marker({
-            position: { lat: wp.lat, lng: wp.lng },
-            map: this._map,
-            icon: {
-              url: Missions._createMarkerIcon(label, type),
-              scaledSize: new google.maps.Size(28, 37),
-              anchor: new google.maps.Point(14, 37)
-            },
-            title: wp.label,
-            zIndex: 50 + i
-          });
-          this._waypointMarkers.push(marker);
-        });
+        this._rebuildWaypointMarkers();
         this._renderWaypointList();
       }
       this._dismissAltRoutes();
@@ -2002,9 +2110,38 @@ RULES:
   // ════════════════════════════════════════════
   //  REPORTS - Post-Flight Report & AI Assessment
   // ════════════════════════════════════════════
+
+  // SVG icon helpers (monochrome, strokeOnly)
+  const RptIcons = {
+    clock:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="20" height="20"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>',
+    route:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="20" height="20"><path d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>',
+    speed:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="20" height="20"><path d="M12 12l3.5-3.5M6.3 17.7a9 9 0 1111.4 0"/></svg>',
+    altitude: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="20" height="20"><path d="M3 17l6-6 4 4 8-8"/><path d="M17 7h4v4"/></svg>',
+    battery:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="20" height="20"><rect x="2" y="7" width="18" height="10" rx="2"/><path d="M22 11v2"/></svg>',
+    pin:      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="20" height="20"><path d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z"/><path d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z"/></svg>',
+    drone:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="16" height="16"><path d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"/><path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>',
+    calendar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="16" height="16"><path d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/></svg>',
+    time:     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="16" height="16"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>',
+    cloud:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="16" height="16"><path d="M2.25 15a4.5 4.5 0 004.5 4.5H18a3.75 3.75 0 001.332-7.257 3 3 0 00-3.758-3.848 5.25 5.25 0 00-10.233 2.33A4.502 4.502 0 002.25 15z"/></svg>',
+    chart:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="16" height="16"><path d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/></svg>',
+    log:      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="16" height="16"><path d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/></svg>',
+    perf:     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="16" height="16"><path d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5"/></svg>',
+    ai:       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="16" height="16"><path d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/></svg>',
+    pdf:      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14"><path d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m.75 12l3 3m0 0l3-3m-3 3v-6m-1.5-9H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/></svg>',
+    signal:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14"><path d="M9.348 14.652a3.75 3.75 0 010-5.304m5.304 0a3.75 3.75 0 010 5.304m-7.425 2.121a6.75 6.75 0 010-9.546m9.546 0a6.75 6.75 0 010 9.546M5.106 18.894c-3.808-3.808-3.808-9.98 0-13.788m13.788 0c3.808 3.808 3.808 9.98 0 13.788M12 12h.008v.008H12V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z"/></svg>',
+    target:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg>',
+    gauge:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14"><path d="M12 12l3.5-3.5M6.3 17.7a9 9 0 1111.4 0"/></svg>',
+    sat:      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14"><path d="M12 3v2m0 14v2m9-9h-2M5 12H3m15.364 6.364l-1.414-1.414M7.05 7.05L5.636 5.636m12.728 0l-1.414 1.414M7.05 16.95l-1.414 1.414M12 8a4 4 0 100 8 4 4 0 000-8z"/></svg>',
+    check:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14"><path d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>',
+    warn:     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14"><path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>',
+    shield:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14"><path d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/></svg>',
+    bulb:     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14"><path d="M12 18v-5.25m0 0a6.01 6.01 0 001.5-.189m-1.5.189a6.01 6.01 0 01-1.5-.189m3.75 7.478a12.06 12.06 0 01-4.5 0m3.75 2.383a14.406 14.406 0 01-3 0M14.25 18v-.192c0-.983.658-1.823 1.508-2.316a7.5 7.5 0 10-7.517 0c.85.493 1.509 1.333 1.509 2.316V18"/></svg>'
+  };
+
   const Reports = {
     _dom: null,
     _aiResult: null,
+    _charts: [],
 
     _getDom() {
       if (this._dom) return this._dom;
@@ -2015,7 +2152,7 @@ RULES:
     },
 
     init() {
-      // Nothing to wire until page renders
+      // Chart.js loaded via script tag in index.html
     },
 
     onEnter() {
@@ -2023,27 +2160,29 @@ RULES:
     },
 
     onLeave() {
-      // Preserve state
+      this._destroyCharts();
+    },
+
+    _destroyCharts() {
+      this._charts.forEach(c => c.destroy());
+      this._charts = [];
     },
 
     _render() {
       const d = this._getDom();
       const fd = state.flightData;
+      this._destroyCharts();
 
       if (!fd) {
         d.container.innerHTML = `
           <div class="rpt-no-data">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="56" height="56">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48">
               <path d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/>
             </svg>
             <h2 class="rpt-no-data-title">No Flight Data</h2>
-            <p class="rpt-no-data-text">Complete a drone flight simulation to generate a flight report with logs, performance data, and AI assessment.</p>
+            <p class="rpt-no-data-text">Complete a drone simulation to generate a report with telemetry, charts, and AI assessment.</p>
             <button class="rpt-no-data-btn" id="rptGoToDrone">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-                <path d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"/>
-                <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
-              </svg>
-              Go to Drone View
+              ${RptIcons.drone} Go to Drone View
             </button>
           </div>`;
         d.container.querySelector('#rptGoToDrone')?.addEventListener('click', () => Navigation.setActive('droneview'));
@@ -2056,20 +2195,16 @@ RULES:
       const startTime = startDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
       const endTime = endDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
       const batteryUsed = fd.batteryStart - fd.batteryEnd;
-      const efficiencyPct = Math.max(60, Math.min(98, Math.round(100 - batteryUsed * 0.4 + Math.random() * 8)));
+      const efficiencyPct = Math.max(60, Math.min(98, Math.round(100 - batteryUsed * 0.4 + fd.waypointsVisited)));
       const gpsAccuracy = (1.2 + Math.random() * 0.6).toFixed(1);
 
-      // Build flight log rows
+      // Flight log rows
       const logRows = fd.flightLog.map(l => {
         const t = new Date(l.time);
-        const timeStr = t.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-        const badgeClass = l.event === 'launch' ? 'launch' : l.event === 'land' ? 'land' : l.event === 'warning' ? 'warning' : 'waypoint';
-        const label = l.event === 'launch' ? 'Launch' : l.event === 'land' ? 'Landing' : l.event === 'warning' ? 'Warning' : 'Waypoint';
-        return `<tr>
-          <td class="rpt-log-time">${timeStr}</td>
-          <td><span class="rpt-log-event-badge ${badgeClass}">${label}</span></td>
-          <td class="rpt-log-detail">${l.detail}</td>
-        </tr>`;
+        const ts = t.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        const cls = l.event === 'launch' ? 'launch' : l.event === 'land' ? 'land' : l.event === 'warning' ? 'warning' : 'waypoint';
+        const lbl = l.event === 'launch' ? 'Launch' : l.event === 'land' ? 'Landing' : l.event === 'warning' ? 'Warning' : 'Waypoint';
+        return `<tr><td class="rpt-log-time">${ts}</td><td><span class="rpt-log-event-badge ${cls}">${lbl}</span></td><td class="rpt-log-detail">${l.detail}</td></tr>`;
       }).join('');
 
       d.container.innerHTML = `
@@ -2081,178 +2216,260 @@ RULES:
           </div>
           <div class="rpt-header-actions">
             <span class="rpt-header-badge rpt-badge-demo">Simulated</span>
-            <span class="rpt-header-badge rpt-badge-complete">Complete</span>
+            <span class="rpt-header-badge rpt-badge-complete"><span class="rpt-badge-dot"></span> Complete</span>
+            <button class="rpt-export-btn" id="btnExportPdf">${RptIcons.pdf} Export PDF</button>
           </div>
         </div>
 
-        <!-- Mission Info Bar -->
+        <!-- Mission Bar -->
         <div class="rpt-mission-bar">
           <div class="rpt-mission-item">
-            <span class="rpt-mission-icon">\u2708\uFE0F</span>
-            <div class="rpt-mission-info">
-              <span class="rpt-mission-label">Drone</span>
-              <span class="rpt-mission-value">${fd.droneModel}</span>
-            </div>
+            <div class="rpt-mission-icon">${RptIcons.drone}</div>
+            <div class="rpt-mission-info"><span class="rpt-mission-label">Drone</span><span class="rpt-mission-value">${fd.droneModel}</span></div>
           </div>
           <div class="rpt-mission-divider"></div>
           <div class="rpt-mission-item">
-            <span class="rpt-mission-icon">\u{1F4C5}</span>
-            <div class="rpt-mission-info">
-              <span class="rpt-mission-label">Date</span>
-              <span class="rpt-mission-value">${dateStr}</span>
-            </div>
+            <div class="rpt-mission-icon">${RptIcons.calendar}</div>
+            <div class="rpt-mission-info"><span class="rpt-mission-label">Date</span><span class="rpt-mission-value">${dateStr}</span></div>
           </div>
           <div class="rpt-mission-divider"></div>
           <div class="rpt-mission-item">
-            <span class="rpt-mission-icon">\u{1F551}</span>
-            <div class="rpt-mission-info">
-              <span class="rpt-mission-label">Window</span>
-              <span class="rpt-mission-value">${startTime} \u2014 ${endTime}</span>
-            </div>
+            <div class="rpt-mission-icon">${RptIcons.time}</div>
+            <div class="rpt-mission-info"><span class="rpt-mission-label">Window</span><span class="rpt-mission-value">${startTime} \u2014 ${endTime}</span></div>
           </div>
           <div class="rpt-mission-divider"></div>
           <div class="rpt-mission-item">
-            <span class="rpt-mission-icon">\u2601\uFE0F</span>
-            <div class="rpt-mission-info">
-              <span class="rpt-mission-label">Weather</span>
-              <span class="rpt-mission-value">${fd.weatherSummary}</span>
-            </div>
+            <div class="rpt-mission-icon">${RptIcons.cloud}</div>
+            <div class="rpt-mission-info"><span class="rpt-mission-label">Weather</span><span class="rpt-mission-value">${fd.weatherSummary}</span></div>
           </div>
         </div>
 
-        <!-- Stats Grid -->
+        <!-- Stats -->
         <div class="rpt-stats-grid">
-          <div class="rpt-stat-card">
-            <span class="rpt-stat-icon">\u23F1</span>
-            <span class="rpt-stat-value">${fd.durationStr}</span>
-            <span class="rpt-stat-label">Duration</span>
-          </div>
-          <div class="rpt-stat-card">
-            <span class="rpt-stat-icon">\u{1F4CF}</span>
-            <span class="rpt-stat-value">${fd.distanceStr}</span>
-            <span class="rpt-stat-label">Distance</span>
-          </div>
-          <div class="rpt-stat-card">
-            <span class="rpt-stat-icon">\u26A1</span>
-            <span class="rpt-stat-value">${fd.avgSpeed}</span>
-            <span class="rpt-stat-label">Avg Speed (km/h)</span>
-          </div>
-          <div class="rpt-stat-card">
-            <span class="rpt-stat-icon">\u{1F6EB}</span>
-            <span class="rpt-stat-value">${fd.maxAltitude}m</span>
-            <span class="rpt-stat-label">Max Altitude</span>
-          </div>
-          <div class="rpt-stat-card">
-            <span class="rpt-stat-icon">\u{1F50B}</span>
-            <span class="rpt-stat-value">${batteryUsed}%</span>
-            <span class="rpt-stat-label">Battery Used</span>
-            <span class="rpt-stat-sub">${fd.batteryEnd}% remaining</span>
-          </div>
-          <div class="rpt-stat-card">
-            <span class="rpt-stat-icon">\u{1F4CD}</span>
-            <span class="rpt-stat-value">${fd.waypointsVisited}</span>
-            <span class="rpt-stat-label">Waypoints</span>
-            <span class="rpt-stat-sub">All visited</span>
-          </div>
+          <div class="rpt-stat-card"><div class="rpt-stat-icon">${RptIcons.clock}</div><span class="rpt-stat-value">${fd.durationStr}</span><span class="rpt-stat-label">Duration</span></div>
+          <div class="rpt-stat-card"><div class="rpt-stat-icon">${RptIcons.route}</div><span class="rpt-stat-value">${fd.distanceStr}</span><span class="rpt-stat-label">Distance</span></div>
+          <div class="rpt-stat-card"><div class="rpt-stat-icon">${RptIcons.speed}</div><span class="rpt-stat-value">${fd.avgSpeed}</span><span class="rpt-stat-label">Avg km/h</span></div>
+          <div class="rpt-stat-card"><div class="rpt-stat-icon">${RptIcons.altitude}</div><span class="rpt-stat-value">${fd.maxAltitude}m</span><span class="rpt-stat-label">Max Alt</span></div>
+          <div class="rpt-stat-card"><div class="rpt-stat-icon">${RptIcons.battery}</div><span class="rpt-stat-value">${batteryUsed}%</span><span class="rpt-stat-label">Battery Used</span><span class="rpt-stat-sub">${fd.batteryEnd}% remaining</span></div>
+          <div class="rpt-stat-card"><div class="rpt-stat-icon">${RptIcons.pin}</div><span class="rpt-stat-value">${fd.waypointsVisited}</span><span class="rpt-stat-label">Waypoints</span><span class="rpt-stat-sub">All visited</span></div>
         </div>
 
-        <!-- Two Column: Performance + Flight Log -->
+        <!-- Charts -->
+        <div class="rpt-charts-grid">
+          <div class="rpt-chart-card wide"><div class="rpt-chart-header"><span class="rpt-chart-title">Altitude Profile</span><span class="rpt-chart-value">Max ${fd.maxAltitude}m</span></div><div class="rpt-chart-canvas-wrap"><canvas id="chartAltitude"></canvas></div></div>
+          <div class="rpt-chart-card"><div class="rpt-chart-header"><span class="rpt-chart-title">Speed Over Time</span><span class="rpt-chart-value">Avg ${fd.avgSpeed} km/h</span></div><div class="rpt-chart-canvas-wrap"><canvas id="chartSpeed"></canvas></div></div>
+          <div class="rpt-chart-card"><div class="rpt-chart-header"><span class="rpt-chart-title">Battery Drain</span><span class="rpt-chart-value">${fd.batteryStart}% \u2192 ${fd.batteryEnd}%</span></div><div class="rpt-chart-canvas-wrap"><canvas id="chartBattery"></canvas></div></div>
+        </div>
+
+        <!-- Performance + Log -->
         <div class="rpt-two-col">
-          <!-- Performance -->
           <div class="rpt-section">
-            <div class="rpt-section-header">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="18" height="18"><path d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5"/></svg>
-              <span class="rpt-section-title">Performance</span>
-            </div>
+            <div class="rpt-section-header">${RptIcons.perf}<span class="rpt-section-title">Performance</span></div>
             <div class="rpt-section-body">
               <div class="rpt-perf-grid">
-                <div class="rpt-perf-row">
-                  <div class="rpt-perf-label-row">
-                    <span class="rpt-perf-label"><span class="rpt-perf-label-icon">\u26A1</span> Flight Efficiency</span>
-                    <span class="rpt-perf-value">${efficiencyPct}%</span>
-                  </div>
-                  <div class="rpt-perf-bar-track"><div class="rpt-perf-bar-fill green" style="width:${efficiencyPct}%"></div></div>
-                </div>
-                <div class="rpt-perf-row">
-                  <div class="rpt-perf-label-row">
-                    <span class="rpt-perf-label"><span class="rpt-perf-label-icon">\u{1F50B}</span> Battery Efficiency</span>
-                    <span class="rpt-perf-value">${fd.batteryEnd}% left</span>
-                  </div>
-                  <div class="rpt-perf-bar-track"><div class="rpt-perf-bar-fill blue" style="width:${fd.batteryEnd}%"></div></div>
-                </div>
-                <div class="rpt-perf-row">
-                  <div class="rpt-perf-label-row">
-                    <span class="rpt-perf-label"><span class="rpt-perf-label-icon">\u{1F4E1}</span> GPS Accuracy</span>
-                    <span class="rpt-perf-value">${gpsAccuracy}m CEP</span>
-                  </div>
-                  <div class="rpt-perf-bar-track"><div class="rpt-perf-bar-fill purple" style="width:${Math.max(20, 100 - parseFloat(gpsAccuracy) * 30)}%"></div></div>
-                </div>
-                <div class="rpt-perf-row">
-                  <div class="rpt-perf-label-row">
-                    <span class="rpt-perf-label"><span class="rpt-perf-label-icon">\u{1F6E1}\uFE0F</span> Signal Strength</span>
-                    <span class="rpt-perf-value">${fd.satellites} sats</span>
-                  </div>
-                  <div class="rpt-perf-bar-track"><div class="rpt-perf-bar-fill amber" style="width:${Math.min(100, fd.satellites * 7)}%"></div></div>
-                </div>
-                <div class="rpt-perf-row">
-                  <div class="rpt-perf-label-row">
-                    <span class="rpt-perf-label"><span class="rpt-perf-label-icon">\u{1F3AF}</span> Route Adherence</span>
-                    <span class="rpt-perf-value">100%</span>
-                  </div>
-                  <div class="rpt-perf-bar-track"><div class="rpt-perf-bar-fill green" style="width:100%"></div></div>
-                </div>
+                <div class="rpt-perf-row"><div class="rpt-perf-label-row"><span class="rpt-perf-label">${RptIcons.gauge} Flight Efficiency</span><span class="rpt-perf-value">${efficiencyPct}%</span></div><div class="rpt-perf-bar-track"><div class="rpt-perf-bar-fill" style="width:${efficiencyPct}%"></div></div></div>
+                <div class="rpt-perf-row"><div class="rpt-perf-label-row"><span class="rpt-perf-label">${RptIcons.battery} Battery Efficiency</span><span class="rpt-perf-value">${fd.batteryEnd}% left</span></div><div class="rpt-perf-bar-track"><div class="rpt-perf-bar-fill" style="width:${fd.batteryEnd}%"></div></div></div>
+                <div class="rpt-perf-row"><div class="rpt-perf-label-row"><span class="rpt-perf-label">${RptIcons.sat} GPS Accuracy</span><span class="rpt-perf-value">${gpsAccuracy}m CEP</span></div><div class="rpt-perf-bar-track"><div class="rpt-perf-bar-fill muted" style="width:${Math.max(20, 100 - parseFloat(gpsAccuracy) * 30)}%"></div></div></div>
+                <div class="rpt-perf-row"><div class="rpt-perf-label-row"><span class="rpt-perf-label">${RptIcons.signal} Signal Strength</span><span class="rpt-perf-value">${fd.satellites} sats</span></div><div class="rpt-perf-bar-track"><div class="rpt-perf-bar-fill muted" style="width:${Math.min(100, fd.satellites * 7)}%"></div></div></div>
+                <div class="rpt-perf-row"><div class="rpt-perf-label-row"><span class="rpt-perf-label">${RptIcons.target} Route Adherence</span><span class="rpt-perf-value">100%</span></div><div class="rpt-perf-bar-track"><div class="rpt-perf-bar-fill" style="width:100%"></div></div></div>
               </div>
             </div>
           </div>
-
-          <!-- Flight Log -->
           <div class="rpt-section">
-            <div class="rpt-section-header">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="18" height="18"><path d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/></svg>
-              <span class="rpt-section-title">Flight Log</span>
-              <span class="rpt-section-badge" style="background:rgba(var(--accent-primary-rgb),0.1);color:var(--accent-primary);">${fd.flightLog.length} events</span>
-            </div>
-            <div class="rpt-section-body" style="padding:12px 0;">
-              <table class="rpt-log-table">
-                <thead>
-                  <tr><th>Time</th><th>Event</th><th>Details</th></tr>
-                </thead>
-                <tbody>${logRows}</tbody>
-              </table>
-            </div>
+            <div class="rpt-section-header">${RptIcons.log}<span class="rpt-section-title">Flight Log</span><span class="rpt-section-badge">${fd.flightLog.length} events</span></div>
+            <div class="rpt-section-body" style="padding:12px 0;"><table class="rpt-log-table"><thead><tr><th>Time</th><th>Event</th><th>Details</th></tr></thead><tbody>${logRows}</tbody></table></div>
           </div>
         </div>
 
-        <!-- AI Assessment Section -->
+        <!-- AI Assessment -->
         <div class="rpt-section rpt-ai-section">
-          <div class="rpt-section-header">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="18" height="18"><path d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/></svg>
-            <span class="rpt-section-title">AI Final Assessment</span>
-            <span class="rpt-section-badge" style="background:rgba(168,85,247,0.1);color:#a855f7;">Gemini</span>
-          </div>
-          <div class="rpt-section-body">
-            <div class="rpt-ai-body" id="rptAiBody">
-              ${this._aiResult ? this._renderAiAssessment(this._aiResult) : `
-              <div class="rpt-ai-empty">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="40" height="40"><path d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/></svg>
-                <p class="rpt-ai-empty-text">Generate a comprehensive AI-powered assessment of this flight, including grading, safety evaluation, and recommendations for future missions.</p>
-              </div>
-              <button class="rpt-ai-generate-btn" id="btnGenerateAssessment">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/></svg>
-                <span class="rpt-ai-btn-text">Generate AI Assessment</span>
-                <div class="rpt-ai-btn-spinner"></div>
-              </button>`}
+          <div class="rpt-section-header">${RptIcons.ai}<span class="rpt-section-title">AI Flight Assessment</span><span class="rpt-section-badge">Gemini</span></div>
+          <div class="rpt-section-body"><div class="rpt-ai-body" id="rptAiBody">
+            ${this._aiResult ? this._renderAiAssessment(this._aiResult) : `
+            <div class="rpt-ai-empty">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="32" height="32"><path d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/></svg>
+              <p class="rpt-ai-empty-text">Generate an AI-powered post-flight assessment with grading, safety evaluation, and recommendations.</p>
             </div>
-          </div>
+            <button class="rpt-ai-generate-btn" id="btnGenerateAssessment">
+              ${RptIcons.ai}
+              <span class="rpt-ai-btn-text">Generate AI Assessment</span>
+              <div class="rpt-ai-btn-spinner"></div>
+            </button>`}
+          </div></div>
         </div>`;
 
-      // Wire generate button
-      const genBtn = d.container.querySelector('#btnGenerateAssessment');
-      if (genBtn) {
-        genBtn.addEventListener('click', () => this._generateAssessment());
+      // Wire events
+      d.container.querySelector('#btnExportPdf')?.addEventListener('click', () => this._exportPdf());
+      d.container.querySelector('#btnGenerateAssessment')?.addEventListener('click', () => this._generateAssessment());
+
+      // Build charts after DOM is ready
+      requestAnimationFrame(() => this._buildCharts(fd));
+
+      // Auto-generate AI assessment if not already done
+      if (!this._aiResult) {
+        setTimeout(() => this._generateAssessment(), 500);
       }
     },
 
+    // ── Charts ──
+    _buildCharts(fd) {
+      if (typeof Chart === 'undefined') return;
+
+      const gridColor = 'rgba(255,255,255,0.04)';
+      const tickColor = 'rgba(255,255,255,0.25)';
+      const accentBlue = 'rgba(59,130,246,0.8)';
+      const accentBlueFill = 'rgba(59,130,246,0.08)';
+      const mutedGray = 'rgba(255,255,255,0.4)';
+      const mutedGrayFill = 'rgba(255,255,255,0.03)';
+
+      Chart.defaults.font.family = "'Inter', sans-serif";
+      Chart.defaults.font.size = 10;
+      Chart.defaults.color = tickColor;
+
+      const numPoints = fd.waypointsVisited + 2; // launch + waypoints + landing
+      const labels = ['Launch', ...fd.waypoints.map((_, i) => `WP ${i + 1}`), 'Landing'];
+
+      // Simulate altitude data
+      const altitudes = [0];
+      fd.waypoints.forEach(w => altitudes.push(w.alt || Math.round(40 + Math.random() * 60)));
+      altitudes.push(0);
+
+      // Simulate speed data
+      const speeds = [0];
+      for (let i = 0; i < fd.waypoints.length; i++) {
+        speeds.push(Math.round(fd.avgSpeed * (0.7 + Math.random() * 0.6)));
+      }
+      speeds.push(0);
+
+      // Battery data
+      const batteryVals = [fd.batteryStart];
+      const step = (fd.batteryStart - fd.batteryEnd) / fd.waypoints.length;
+      for (let i = 0; i < fd.waypoints.length; i++) {
+        batteryVals.push(Math.round(fd.batteryStart - step * (i + 1) + (Math.random() - 0.5) * 3));
+      }
+      batteryVals.push(fd.batteryEnd);
+
+      const baseOpts = {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { intersect: false, mode: 'index' },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: 'rgba(15,15,20,0.9)',
+            borderColor: 'rgba(255,255,255,0.08)',
+            borderWidth: 1,
+            titleFont: { size: 11, weight: '600' },
+            bodyFont: { size: 11 },
+            padding: 10,
+            cornerRadius: 6
+          }
+        },
+        scales: {
+          x: { grid: { color: gridColor, drawBorder: false }, ticks: { maxRotation: 0, font: { size: 9 } } },
+          y: { grid: { color: gridColor, drawBorder: false }, ticks: { font: { size: 9 } } }
+        }
+      };
+
+      // Altitude chart
+      const ctr = this._getDom().container;
+      const altCtx = ctr.querySelector('#chartAltitude');
+      if (altCtx) {
+        this._charts.push(new Chart(altCtx, {
+          type: 'line',
+          data: {
+            labels,
+            datasets: [{
+              data: altitudes,
+              borderColor: accentBlue,
+              backgroundColor: accentBlueFill,
+              fill: true,
+              tension: 0.35,
+              borderWidth: 2,
+              pointRadius: 3,
+              pointBackgroundColor: accentBlue,
+              pointBorderWidth: 0
+            }]
+          },
+          options: { ...baseOpts, scales: { ...baseOpts.scales, y: { ...baseOpts.scales.y, title: { display: true, text: 'Altitude (m)', font: { size: 9 }, color: tickColor } } } }
+        }));
+      }
+
+      // Speed chart
+      const speedCtx = ctr.querySelector('#chartSpeed');
+      if (speedCtx) {
+        this._charts.push(new Chart(speedCtx, {
+          type: 'line',
+          data: {
+            labels,
+            datasets: [{
+              data: speeds,
+              borderColor: mutedGray,
+              backgroundColor: mutedGrayFill,
+              fill: true,
+              tension: 0.35,
+              borderWidth: 1.5,
+              pointRadius: 2.5,
+              pointBackgroundColor: mutedGray,
+              pointBorderWidth: 0
+            }]
+          },
+          options: { ...baseOpts, scales: { ...baseOpts.scales, y: { ...baseOpts.scales.y, title: { display: true, text: 'km/h', font: { size: 9 }, color: tickColor } } } }
+        }));
+      }
+
+      // Battery chart
+      const batCtx = ctr.querySelector('#chartBattery');
+      if (batCtx) {
+        this._charts.push(new Chart(batCtx, {
+          type: 'line',
+          data: {
+            labels,
+            datasets: [{
+              data: batteryVals,
+              borderColor: accentBlue,
+              backgroundColor: accentBlueFill,
+              fill: true,
+              tension: 0.25,
+              borderWidth: 1.5,
+              pointRadius: 2.5,
+              pointBackgroundColor: accentBlue,
+              pointBorderWidth: 0
+            }]
+          },
+          options: { ...baseOpts, scales: { ...baseOpts.scales, y: { ...baseOpts.scales.y, min: 0, max: 100, title: { display: true, text: '%', font: { size: 9 }, color: tickColor } } } }
+        }));
+      }
+    },
+
+    // ── PDF Export ──
+    async _exportPdf() {
+      const btn = this._getDom().container.querySelector('#btnExportPdf');
+      if (btn) { btn.disabled = true; btn.innerHTML = RptIcons.pdf + ' Exporting\u2026'; }
+
+      try {
+        if (window.helios?.exportPdf) {
+          const result = await window.helios.exportPdf();
+          if (result.success) {
+            if (btn) btn.innerHTML = RptIcons.pdf + ' Exported';
+            setTimeout(() => { if (btn) { btn.innerHTML = RptIcons.pdf + ' Export PDF'; btn.disabled = false; } }, 2000);
+          } else if (result.reason !== 'cancelled') {
+            throw new Error(result.reason);
+          } else {
+            if (btn) { btn.innerHTML = RptIcons.pdf + ' Export PDF'; btn.disabled = false; }
+          }
+        } else {
+          window.print();
+          if (btn) { btn.innerHTML = RptIcons.pdf + ' Export PDF'; btn.disabled = false; }
+        }
+      } catch (err) {
+        console.error('PDF export error:', err);
+        if (btn) { btn.innerHTML = RptIcons.pdf + ' Export Failed'; btn.disabled = false; }
+        setTimeout(() => { if (btn) btn.innerHTML = RptIcons.pdf + ' Export PDF'; }, 2500);
+      }
+    },
+
+    // ── AI Assessment ──
     async _generateAssessment() {
       const d = this._getDom();
       const fd = state.flightData;
@@ -2262,81 +2479,58 @@ RULES:
       if (btn) btn.classList.add('loading');
 
       let apiKey = '';
-      try {
-        if (window.helios?.getEnv) apiKey = await window.helios.getEnv('GEMINI_API_KEY');
-      } catch (_) {}
-
+      try { if (window.helios?.getEnv) apiKey = await window.helios.getEnv('GEMINI_API_KEY'); } catch (_) {}
       if (!apiKey) {
-        this._showAssessmentError('Gemini API key not configured. Add GEMINI_API_KEY to .env and restart.');
+        this._showAssessmentError('Gemini API key not available.');
         if (btn) btn.classList.remove('loading');
         return;
       }
 
-      const prompt = `You are a senior eVTOL drone flight operations officer. Provide a comprehensive post-flight assessment for the following completed mission.
+      const prompt = `You are a senior eVTOL drone flight operations officer. Provide a comprehensive post-flight assessment.
 
 FLIGHT DATA:
 - Drone: ${fd.droneModel} (ID: ${fd.droneId})
-- Mission Date: ${fd.missionStart}
 - Duration: ${fd.durationStr}
-- Total Distance: ${fd.distanceStr}
-- Battery: Started at ${fd.batteryStart}%, ended at ${fd.batteryEnd}% (${fd.batteryStart - fd.batteryEnd}% consumed)
-- Average Speed: ${fd.avgSpeed} km/h, Max Speed: ${fd.maxSpeed} km/h
+- Distance: ${fd.distanceStr}
+- Battery: ${fd.batteryStart}% to ${fd.batteryEnd}% (${fd.batteryStart - fd.batteryEnd}% used)
+- Avg Speed: ${fd.avgSpeed} km/h, Max: ${fd.maxSpeed} km/h
 - Max Altitude: ${fd.maxAltitude}m
-- Waypoints: ${fd.waypointsVisited} (all visited successfully)
-- GPS Satellites: ${fd.satellites}
-- Weather conditions: ${fd.weatherSummary}
+- Waypoints: ${fd.waypointsVisited} visited
+- Satellites: ${fd.satellites}
+- Weather: ${fd.weatherSummary}
 
 FLIGHT LOG:
-${fd.flightLog.map(l => `- [${l.event.toUpperCase()}] ${l.detail}`).join('\n')}
+${fd.flightLog.map(l => `[${l.event.toUpperCase()}] ${l.detail}`).join('\n')}
 
-WAYPOINTS VISITED:
-${fd.waypoints.map((w, i) => `  ${i + 1}. ${w.label} (lat: ${w.lat.toFixed(5)}, lng: ${w.lng.toFixed(5)}, alt: ${w.alt}m)`).join('\n')}
-
-Return JSON only (no markdown, no code fences):
+Return JSON only (no markdown, no fences):
 {
   "grade": "<A+|A|A-|B+|B|B-|C+|C|D|F>",
-  "gradeTitle": "<e.g. Excellent Performance>",
-  "gradeDescription": "<1 sentence about the grade>",
-  "overallSummary": "<3-4 sentence comprehensive assessment>",
-  "strengths": ["<strength 1>", "<strength 2>", ...],
-  "areasForImprovement": ["<improvement 1>", "<improvement 2>", ...],
-  "safetyEvaluation": {
-    "rating": "<excellent|good|acceptable|concerning|poor>",
-    "notes": ["<note 1>", "<note 2>", ...]
-  },
-  "recommendations": ["<recommendation 1>", "<recommendation 2>", ...],
-  "missionEfficiency": "<percentage string, e.g. 94%>",
-  "riskEvents": <number of risk events detected>,
+  "gradeTitle": "<short title>",
+  "gradeDescription": "<1 sentence>",
+  "overallSummary": "<3-4 sentence assessment>",
+  "strengths": ["<str1>", "<str2>", "<str3>"],
+  "areasForImprovement": ["<imp1>", "<imp2>"],
+  "safetyEvaluation": { "rating": "<excellent|good|acceptable|concerning|poor>", "notes": ["<n1>", "<n2>"] },
+  "recommendations": ["<rec1>", "<rec2>", "<rec3>"],
+  "missionEfficiency": "<e.g. 94%>",
+  "riskEvents": <number>,
   "complianceStatus": "<compliant|minor-issues|non-compliant>"
 }`;
 
       try {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
-        const response = await fetch(url, {
+        const resp = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { temperature: 0.4, maxOutputTokens: 2048 }
-          })
+          body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.4, maxOutputTokens: 2048 } })
         });
-
-        if (!response.ok) {
-          const errBody = await response.json().catch(() => ({}));
-          throw new Error(errBody?.error?.message || `Gemini API error (${response.status})`);
-        }
-
-        const data = await response.json();
+        if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e?.error?.message || `API error ${resp.status}`); }
+        const data = await resp.json();
         const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-        const jsonStr = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-        const result = JSON.parse(jsonStr);
-
+        const result = JSON.parse(text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim());
         this._aiResult = result;
-        // Re-render AI section
         const aiBody = d.container.querySelector('#rptAiBody');
-        if (aiBody) {
-          aiBody.innerHTML = this._renderAiAssessment(result);
-        }
+        if (aiBody) aiBody.innerHTML = this._renderAiAssessment(result);
       } catch (err) {
         if (btn) btn.classList.remove('loading');
         this._showAssessmentError(err.message);
@@ -2344,78 +2538,36 @@ Return JSON only (no markdown, no code fences):
     },
 
     _renderAiAssessment(data) {
-      const gradeChar = (data.grade || 'B')[0].toUpperCase();
-      const gradeClass = gradeChar === 'A' ? 'grade-a' : gradeChar === 'B' ? 'grade-b' : gradeChar === 'C' ? 'grade-c' : gradeChar === 'D' ? 'grade-d' : 'grade-f';
-
-      const safetyColor = {
-        excellent: '#22c55e', good: '#3b82f6', acceptable: '#eab308', concerning: '#f97316', poor: '#ef4444'
-      }[data.safetyEvaluation?.rating] || '#3b82f6';
-
       return `
         <div class="rpt-ai-assessment">
           <div class="rpt-ai-grade-row">
-            <span class="rpt-ai-grade ${gradeClass}">${data.grade || 'B'}</span>
+            <span class="rpt-ai-grade">${data.grade || 'B'}</span>
             <div class="rpt-ai-grade-info">
               <span class="rpt-ai-grade-title">${data.gradeTitle || 'Good Performance'}</span>
               <span class="rpt-ai-grade-desc">${data.gradeDescription || ''}</span>
             </div>
           </div>
-
           <p class="rpt-ai-summary">${data.overallSummary || ''}</p>
-
-          <div style="display:flex;gap:10px;flex-wrap:wrap;">
-            <span class="rpt-header-badge" style="background:rgba(var(--accent-primary-rgb),0.1);border-color:rgba(var(--accent-primary-rgb),0.25);color:var(--accent-primary);">Efficiency: ${data.missionEfficiency || '—'}</span>
-            <span class="rpt-header-badge" style="background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.25);color:#22c55e;">Compliance: ${data.complianceStatus || '—'}</span>
-            <span class="rpt-header-badge" style="background:rgba(${safetyColor === '#22c55e' ? '34,197,94' : safetyColor === '#3b82f6' ? '59,130,246' : '234,179,8'},0.1);border:1px solid rgba(${safetyColor === '#22c55e' ? '34,197,94' : safetyColor === '#3b82f6' ? '59,130,246' : '234,179,8'},0.25);color:${safetyColor};">Safety: ${data.safetyEvaluation?.rating || '—'}</span>
-            <span class="rpt-header-badge" style="background:rgba(168,85,247,0.1);border:1px solid rgba(168,85,247,0.25);color:#a855f7;">Risk Events: ${data.riskEvents ?? 0}</span>
+          <div class="rpt-ai-meta">
+            <span class="rpt-ai-meta-tag">Efficiency: ${data.missionEfficiency || '\u2014'}</span>
+            <span class="rpt-ai-meta-tag">Compliance: ${data.complianceStatus || '\u2014'}</span>
+            <span class="rpt-ai-meta-tag">Safety: ${(data.safetyEvaluation?.rating || '\u2014')}</span>
+            <span class="rpt-ai-meta-tag">Risk Events: ${data.riskEvents ?? 0}</span>
           </div>
-
-          ${(data.strengths || []).length ? `
-          <div class="rpt-ai-block">
-            <h4 class="rpt-ai-block-title">
-              <svg viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="1.5" width="14" height="14"><path d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-              Strengths
-            </h4>
-            <ul class="rpt-ai-list">${data.strengths.map(s => `<li>${s}</li>`).join('')}</ul>
-          </div>` : ''}
-
-          ${(data.areasForImprovement || []).length ? `
-          <div class="rpt-ai-block">
-            <h4 class="rpt-ai-block-title">
-              <svg viewBox="0 0 24 24" fill="none" stroke="#eab308" stroke-width="1.5" width="14" height="14"><path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
-              Areas for Improvement
-            </h4>
-            <ul class="rpt-ai-list">${data.areasForImprovement.map(a => `<li>${a}</li>`).join('')}</ul>
-          </div>` : ''}
-
-          ${(data.safetyEvaluation?.notes || []).length ? `
-          <div class="rpt-ai-block">
-            <h4 class="rpt-ai-block-title">
-              <svg viewBox="0 0 24 24" fill="none" stroke="${safetyColor}" stroke-width="1.5" width="14" height="14"><path d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/></svg>
-              Safety Evaluation — ${(data.safetyEvaluation.rating || '').charAt(0).toUpperCase() + (data.safetyEvaluation.rating || '').slice(1)}
-            </h4>
-            <ul class="rpt-ai-list">${data.safetyEvaluation.notes.map(n => `<li>${n}</li>`).join('')}</ul>
-          </div>` : ''}
-
-          ${(data.recommendations || []).length ? `
-          <div class="rpt-ai-block">
-            <h4 class="rpt-ai-block-title">
-              <svg viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="1.5" width="14" height="14"><path d="M12 18v-5.25m0 0a6.01 6.01 0 001.5-.189m-1.5.189a6.01 6.01 0 01-1.5-.189m3.75 7.478a12.06 12.06 0 01-4.5 0m3.75 2.383a14.406 14.406 0 01-3 0M14.25 18v-.192c0-.983.658-1.823 1.508-2.316a7.5 7.5 0 10-7.517 0c.85.493 1.509 1.333 1.509 2.316V18"/></svg>
-              Recommendations
-            </h4>
-            <ul class="rpt-ai-list">${data.recommendations.map(r => `<li>${r}</li>`).join('')}</ul>
-          </div>` : ''}
+          ${(data.strengths || []).length ? `<div class="rpt-ai-block"><h4 class="rpt-ai-block-title">${RptIcons.check} Strengths</h4><ul class="rpt-ai-list">${data.strengths.map(s => `<li>${s}</li>`).join('')}</ul></div>` : ''}
+          ${(data.areasForImprovement || []).length ? `<div class="rpt-ai-block"><h4 class="rpt-ai-block-title">${RptIcons.warn} Areas for Improvement</h4><ul class="rpt-ai-list">${data.areasForImprovement.map(a => `<li>${a}</li>`).join('')}</ul></div>` : ''}
+          ${(data.safetyEvaluation?.notes || []).length ? `<div class="rpt-ai-block"><h4 class="rpt-ai-block-title">${RptIcons.shield} Safety Evaluation</h4><ul class="rpt-ai-list">${data.safetyEvaluation.notes.map(n => `<li>${n}</li>`).join('')}</ul></div>` : ''}
+          ${(data.recommendations || []).length ? `<div class="rpt-ai-block"><h4 class="rpt-ai-block-title">${RptIcons.bulb} Recommendations</h4><ul class="rpt-ai-list">${data.recommendations.map(r => `<li>${r}</li>`).join('')}</ul></div>` : ''}
         </div>`;
     },
 
     _showAssessmentError(message) {
-      const d = this._getDom();
-      const aiBody = d.container.querySelector('#rptAiBody');
+      const aiBody = this._getDom().container.querySelector('#rptAiBody');
       if (!aiBody) return;
-      const errEl = document.createElement('div');
-      errEl.style.cssText = 'padding:12px 16px;border-radius:12px;border:1px solid rgba(239,68,68,0.3);background:rgba(239,68,68,0.06);color:#ef4444;font-size:13px;margin-top:8px;';
-      errEl.textContent = message;
-      aiBody.appendChild(errEl);
+      const el = document.createElement('div');
+      el.style.cssText = 'padding:10px 14px;border-radius:6px;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.02);color:var(--text-tertiary);font-size:12px;margin-top:8px;';
+      el.textContent = message;
+      aiBody.appendChild(el);
     }
   };
 

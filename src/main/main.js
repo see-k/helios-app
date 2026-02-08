@@ -1,5 +1,6 @@
-const { app, BrowserWindow, ipcMain, nativeTheme } = require('electron');
+const { app, BrowserWindow, ipcMain, nativeTheme, dialog } = require('electron');
 const path = require('path');
+const fs = require('fs');
 
 // Load .env from project root
 require('dotenv').config({ path: path.join(__dirname, '../../.env') });
@@ -70,6 +71,26 @@ ipcMain.on('window-maximize', () => {
 
 ipcMain.on('window-close', () => {
   mainWindow?.close();
+});
+
+ipcMain.handle('export-pdf', async () => {
+  try {
+    const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+      title: 'Export Flight Report',
+      defaultPath: `Helios-Flight-Report-${new Date().toISOString().slice(0, 10)}.pdf`,
+      filters: [{ name: 'PDF', extensions: ['pdf'] }]
+    });
+    if (canceled || !filePath) return { success: false, reason: 'cancelled' };
+    const pdfData = await mainWindow.webContents.printToPDF({
+      printBackground: true,
+      landscape: true,
+      margins: { top: 0.4, bottom: 0.4, left: 0.4, right: 0.4 }
+    });
+    fs.writeFileSync(filePath, pdfData);
+    return { success: true, path: filePath };
+  } catch (err) {
+    return { success: false, reason: err.message };
+  }
 });
 
 app.whenReady().then(createWindow);
