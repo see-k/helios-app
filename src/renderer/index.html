@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https://sketchfab.com https://maps.googleapis.com https://maps.gstatic.com https://maps.google.com; img-src 'self' data: https://*.googleapis.com https://*.gstatic.com https://*.google.com https://*.googleusercontent.com; frame-src https://sketchfab.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com https://fonts.googleapis.com; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://maps.googleapis.com;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https://sketchfab.com https://maps.googleapis.com https://maps.gstatic.com https://maps.google.com https://generativelanguage.googleapis.com https://api.open-meteo.com; connect-src 'self' https://generativelanguage.googleapis.com https://api.open-meteo.com https://maps.googleapis.com; img-src 'self' data: https://*.googleapis.com https://*.gstatic.com https://*.google.com https://*.googleusercontent.com; frame-src https://sketchfab.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com https://fonts.googleapis.com; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://maps.googleapis.com;">
   <title>Helios</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -220,10 +220,11 @@
             </div>
 
             <button type="submit" class="form-submit" id="btnStartMission">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+              <svg class="submit-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
                 <path d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"/>
               </svg>
-              Plan Mission
+              <span class="submit-label">Plan Mission</span>
+              <div class="submit-spinner"></div>
             </button>
           </form>
         </div>
@@ -266,8 +267,71 @@
               </button>
             </div>
           </div>
+
+          <!-- AI Loading Indicator (center of map) -->
+          <div class="ai-loading-overlay" id="aiLoadingOverlay">
+            <div class="ai-loading-card">
+              <div class="loading-spinner"></div>
+              <span>Planning mission...</span>
+            </div>
+          </div>
+
+          <!-- AI Route Control Bar (top-center) -->
+          <div class="ai-control-bar" id="aiControlBar">
+            <div class="ai-control-left">
+              <div class="ai-badge-sm">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14"><path d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/></svg>
+                AI Route
+              </div>
+              <div class="ai-legend">
+                <span class="legend-item"><span class="legend-dot legend-user"></span>Your Route</span>
+                <span class="legend-item"><span class="legend-dot legend-ai"></span>AI Optimized</span>
+              </div>
+            </div>
+            <div class="ai-control-actions">
+              <button class="ai-ctrl-btn ai-ctrl-dismiss" id="btnDismissAi">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M6 18L18 6M6 6l12 12"/></svg>
+                Dismiss
+              </button>
+              <button class="ai-ctrl-btn ai-ctrl-replan" id="btnReplanAi">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182"/></svg>
+                Re-plan
+              </button>
+              <button class="ai-ctrl-btn ai-ctrl-accept" id="btnAcceptAi">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M4.5 12.75l6 6 9-13.5"/></svg>
+                Accept Route
+              </button>
+            </div>
+          </div>
+
+          <!-- Weather Panel (top-left floating) -->
+          <div class="ai-weather-panel" id="aiWeatherPanel">
+            <div class="ai-panel-header">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="16" height="16"><path d="M2.25 15a4.5 4.5 0 004.5 4.5H18a3.75 3.75 0 001.332-7.257 3 3 0 00-3.758-3.848 5.25 5.25 0 00-10.233 2.33A4.502 4.502 0 002.25 15z"/></svg>
+              <span class="ai-panel-title">Weather at Launch</span>
+              <button class="ai-panel-dismiss" id="btnCloseWeather" title="Close">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><path d="M6 18L18 6M6 6l12 12"/></svg>
+              </button>
+            </div>
+            <div class="ai-weather-body" id="aiWeatherBody"></div>
+          </div>
+
+          <!-- Pilot Briefing Panel (bottom-left floating) -->
+          <div class="ai-briefing-panel" id="aiBriefingPanel">
+            <div class="ai-panel-header">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="16" height="16"><path d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25zM6.75 12h.008v.008H6.75V12zm0 3h.008v.008H6.75V15zm0 3h.008v.008H6.75V18z"/></svg>
+              <span class="ai-panel-title">Pilot Briefing</span>
+              <span class="ai-risk-badge" id="aiBriefingRisk">--</span>
+              <button class="ai-panel-dismiss" id="btnCloseBriefing" title="Close">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><path d="M6 18L18 6M6 6l12 12"/></svg>
+              </button>
+            </div>
+            <div class="ai-briefing-body" id="aiBriefingBody"></div>
+          </div>
+
         </div>
       </div>
+
     </section>
 
     <!-- Right Navigation Bar -->

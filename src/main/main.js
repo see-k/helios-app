@@ -49,7 +49,7 @@ ipcMain.handle('toggle-theme', (event, theme) => {
 
 ipcMain.handle('get-env', (event, key) => {
   // Only expose whitelisted keys
-  const allowed = ['GOOGLE_MAPS_API_KEY'];
+  const allowed = ['GOOGLE_MAPS_API_KEY', 'GEMINI_API_KEY'];
   if (allowed.includes(key)) {
     return process.env[key] || '';
   }

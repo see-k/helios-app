@@ -167,9 +167,12 @@
     _polyline: null,
     _unit: 'kg',       // 'kg' | 'lbs'
     _waypointIdSeq: 0,
+    _aiMarkers: [],
+    _aiPolyline: null,
 
     // DOM shortcuts (cached on first use)
     _dom: null,
+    _lastAiResult: null,
     _getDom() {
       if (this._dom) return this._dom;
       this._dom = {
@@ -185,7 +188,20 @@
         btnSubmit: document.getElementById('btnStartMission'),
         formPanel: document.getElementById('missionFormPanel'),
         btnCollapse: document.getElementById('btnCollapseForm'),
-        btnExpand: document.getElementById('btnExpandForm')
+        btnExpand: document.getElementById('btnExpandForm'),
+        // AI panels
+        aiLoadingOverlay: document.getElementById('aiLoadingOverlay'),
+        aiControlBar: document.getElementById('aiControlBar'),
+        aiWeatherPanel: document.getElementById('aiWeatherPanel'),
+        aiWeatherBody: document.getElementById('aiWeatherBody'),
+        aiBriefingPanel: document.getElementById('aiBriefingPanel'),
+        aiBriefingBody: document.getElementById('aiBriefingBody'),
+        aiBriefingRisk: document.getElementById('aiBriefingRisk'),
+        btnDismissAi: document.getElementById('btnDismissAi'),
+        btnReplanAi: document.getElementById('btnReplanAi'),
+        btnAcceptAi: document.getElementById('btnAcceptAi'),
+        btnCloseWeather: document.getElementById('btnCloseWeather'),
+        btnCloseBriefing: document.getElementById('btnCloseBriefing')
       };
       return this._dom;
     },
@@ -208,6 +224,12 @@
         e.preventDefault();
         this._submitMission();
       });
+      // AI panel controls
+      d.btnDismissAi.addEventListener('click', () => this._dismissAiRoute());
+      d.btnReplanAi.addEventListener('click', () => this._replanMission());
+      d.btnAcceptAi.addEventListener('click', () => this._acceptAiRoute());
+      d.btnCloseWeather.addEventListener('click', () => d.aiWeatherPanel.classList.remove('visible'));
+      d.btnCloseBriefing.addEventListener('click', () => d.aiBriefingPanel.classList.remove('visible'));
     },
 
     onEnter() {
@@ -582,7 +604,7 @@
     },
 
     // ── Form Submit ──
-    _submitMission() {
+    async _submitMission() {
       const d = this._getDom();
       if (this._markers.length < 2) {
         alert('Add at least 2 waypoints to plan a mission.');
@@ -608,8 +630,466 @@
         totalDistance: this._computeDistance()
       };
 
-      console.log('Mission planned:', mission);
-      // TODO: send to backend / store locally
+      // Clear any previous AI results
+      this._clearAiRoute();
+      this._hideAiPanels();
+
+      // Show loading
+      d.btnSubmit.classList.add('loading');
+      d.aiLoadingOverlay.classList.add('visible');
+
+      // Fetch weather + AI in parallel
+      try {
+        const takeoffWp = waypoints[0];
+        const dateStr = takeoffDate ? takeoffDate.split('T')[0] : '';
+
+        const [weatherData, aiResult] = await Promise.allSettled([
+          this._fetchWeather(takeoffWp.lat, takeoffWp.lng, dateStr),
+          this._callGeminiAI(mission)
+        ]);
+
+        d.aiLoadingOverlay.classList.remove('visible');
+
+        // Render weather panel
+        if (weatherData.status === 'fulfilled' && weatherData.value) {
+          this._showWeatherPanel(weatherData.value);
+        }
+
+        // Render AI route on map + briefing panel
+        if (aiResult.status === 'fulfilled' && aiResult.value) {
+          this._lastAiResult = aiResult.value;
+          if (aiResult.value.optimizedWaypoints) {
+            this._showAiRoute(aiResult.value.optimizedWaypoints);
+          }
+          if (aiResult.value.pilotBriefing) {
+            this._showBriefingPanel(aiResult.value.pilotBriefing);
+          }
+          d.aiControlBar.classList.add('visible');
+        } else {
+          const errMsg = aiResult.reason?.message || 'Failed to get AI analysis. Check your GEMINI_API_KEY.';
+          this._showErrorToast(errMsg);
+        }
+      } catch (err) {
+        d.aiLoadingOverlay.classList.remove('visible');
+        this._showErrorToast(err.message);
+      } finally {
+        d.btnSubmit.classList.remove('loading');
+      }
+    },
+
+    // ═══════════════════════════════════════════
+    //  GEMINI AI INTEGRATION
+    // ═══════════════════════════════════════════
+
+    async _callGeminiAI(mission) {
+      let apiKey = '';
+      try {
+        if (window.helios?.getEnv) {
+          apiKey = await window.helios.getEnv('GEMINI_API_KEY');
+        }
+      } catch (_) { /* ignore */ }
+
+      if (!apiKey || apiKey === 'YOUR_GEMINI_API_KEY_HERE') {
+        throw new Error('Gemini API key not configured. Add your GEMINI_API_KEY to the .env file and restart the app.');
+      }
+
+      const droneSpecs = {
+        'helios-x1': { name: 'Helios X1 Recon', maxAltitude: 120, maxSpeed: 65, maxFlightTime: 35, maxPayload: 2.5 },
+        'helios-h4': { name: 'Helios H4 Heavy Lift', maxAltitude: 100, maxSpeed: 45, maxFlightTime: 25, maxPayload: 15 },
+        'helios-s2': { name: 'Helios S2 Survey', maxAltitude: 150, maxSpeed: 55, maxFlightTime: 40, maxPayload: 5 }
+      };
+      const drone = droneSpecs[mission.droneModel] || droneSpecs['helios-x1'];
+
+      const prompt = `You are an expert eVTOL drone mission planner. Analyze this mission and provide an optimized flight plan.
+
+MISSION DATA:
+- Drone: ${drone.name} (max altitude: ${drone.maxAltitude}m, max speed: ${drone.maxSpeed}km/h, max flight time: ${drone.maxFlightTime}min, max payload: ${drone.maxPayload}kg)
+- Scheduled takeoff: ${mission.takeoffDate || 'Not specified'}
+- Payload weight: ${mission.loadWeight} ${mission.weightUnit}
+- Mission description: ${mission.missionDescription || 'General mission'}
+- Total route distance: ${(mission.totalDistance / 1000).toFixed(2)} km
+
+WAYPOINTS (user-defined):
+${mission.waypoints.map((wp, i) => `  ${i + 1}. [${wp.type}] ${wp.label} — lat: ${wp.lat.toFixed(6)}, lng: ${wp.lng.toFixed(6)}`).join('\n')}
+
+INSTRUCTIONS:
+Return a JSON response with EXACTLY this structure (no markdown, no code fences, just raw JSON):
+{
+  "optimizedWaypoints": [
+    {
+      "lat": <number>,
+      "lng": <number>,
+      "altitude_m": <recommended altitude in meters>,
+      "label": "<descriptive label>",
+      "type": "<takeoff|waypoint|rtl>"
+    }
+  ],
+  "pilotBriefing": {
+    "summary": "<2-3 sentence mission overview>",
+    "safetyConsiderations": ["<safety item 1>", "<safety item 2>", ...],
+    "recommendations": ["<recommendation 1>", "<recommendation 2>", ...],
+    "estimatedFlightTime": "<e.g. 12 min>",
+    "maxAltitude": "<e.g. 80m>",
+    "riskLevel": "<low|medium|high>"
+  }
+}
+
+RULES:
+- Keep the same number of waypoints as the user provided
+- Optimize altitudes based on the drone specs, terrain, and mission type
+- The first waypoint must be type "takeoff" and the last must be type "rtl"
+- Altitudes should be between 30m and the drone's max altitude
+- Provide practical safety considerations and recommendations
+- Consider payload weight impact on flight time and performance
+- Be concise but thorough in the briefing`;
+
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0.4,
+            maxOutputTokens: 2048
+          }
+        })
+      });
+
+      if (!response.ok) {
+        const errBody = await response.json().catch(() => ({}));
+        throw new Error(errBody?.error?.message || `Gemini API error (${response.status})`);
+      }
+
+      const data = await response.json();
+      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+      // Parse JSON from response (strip markdown fences if present)
+      const jsonStr = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+      try {
+        return JSON.parse(jsonStr);
+      } catch (e) {
+        console.error('Gemini response parse error:', text);
+        throw new Error('Failed to parse AI response. Please try again.');
+      }
+    },
+
+    // ═══════════════════════════════════════════
+    //  OPEN-METEO WEATHER (Free, no API key)
+    // ═══════════════════════════════════════════
+
+    async _fetchWeather(lat, lng, dateStr) {
+      if (!lat || !lng) return null;
+
+      // If no date or date is in the past, use today
+      const today = new Date().toISOString().split('T')[0];
+      const targetDate = dateStr && dateStr >= today ? dateStr : today;
+
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}`
+        + `&hourly=temperature_2m,windspeed_10m,winddirection_10m,precipitation_probability,visibility,weathercode`
+        + `&start_date=${targetDate}&end_date=${targetDate}`
+        + `&timezone=auto`;
+
+      const response = await fetch(url);
+      if (!response.ok) return null;
+
+      const data = await response.json();
+      if (!data.hourly || !data.hourly.time) return null;
+
+      // Pick midday hour (12:00) or closest available
+      const hours = data.hourly.time;
+      let bestIdx = 0;
+      for (let i = 0; i < hours.length; i++) {
+        if (hours[i].includes('T12:00')) { bestIdx = i; break; }
+        if (hours[i].includes('T13:00') || hours[i].includes('T11:00')) bestIdx = i;
+      }
+
+      return {
+        temperature: data.hourly.temperature_2m?.[bestIdx],
+        windSpeed: data.hourly.windspeed_10m?.[bestIdx],
+        windDirection: data.hourly.winddirection_10m?.[bestIdx],
+        precipitationProb: data.hourly.precipitation_probability?.[bestIdx],
+        visibility: data.hourly.visibility?.[bestIdx],
+        weatherCode: data.hourly.weathercode?.[bestIdx],
+        date: targetDate
+      };
+    },
+
+    _weatherCodeToInfo(code) {
+      // WMO Weather interpretation codes
+      const map = {
+        0: { icon: '☀️', label: 'Clear Sky' },
+        1: { icon: '🌤️', label: 'Mainly Clear' },
+        2: { icon: '⛅', label: 'Partly Cloudy' },
+        3: { icon: '☁️', label: 'Overcast' },
+        45: { icon: '🌫️', label: 'Fog' },
+        48: { icon: '🌫️', label: 'Rime Fog' },
+        51: { icon: '🌦️', label: 'Light Drizzle' },
+        53: { icon: '🌦️', label: 'Drizzle' },
+        55: { icon: '🌧️', label: 'Heavy Drizzle' },
+        61: { icon: '🌧️', label: 'Light Rain' },
+        63: { icon: '🌧️', label: 'Rain' },
+        65: { icon: '🌧️', label: 'Heavy Rain' },
+        71: { icon: '🌨️', label: 'Light Snow' },
+        73: { icon: '🌨️', label: 'Snow' },
+        75: { icon: '❄️', label: 'Heavy Snow' },
+        80: { icon: '🌦️', label: 'Rain Showers' },
+        81: { icon: '🌧️', label: 'Moderate Showers' },
+        82: { icon: '⛈️', label: 'Violent Showers' },
+        95: { icon: '⛈️', label: 'Thunderstorm' },
+        96: { icon: '⛈️', label: 'T-Storm w/ Hail' },
+        99: { icon: '⛈️', label: 'Severe T-Storm' }
+      };
+      return map[code] || { icon: '🌡️', label: 'Unknown' };
+    },
+
+    _windDirToCompass(deg) {
+      const dirs = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+      return dirs[Math.round(deg / 22.5) % 16];
+    },
+
+    // ═══════════════════════════════════════════
+    //  AI ROUTE DISPLAY ON MAP
+    // ═══════════════════════════════════════════
+
+    _createAiMarkerIcon(label, type) {
+      const colors = {
+        takeoff: { bg: '#a855f7', border: '#7c3aed' },
+        waypoint: { bg: '#8b5cf6', border: '#6d28d9' },
+        rtl: { bg: '#d946ef', border: '#c026d3' }
+      };
+      const c = colors[type] || colors.waypoint;
+      const svg = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+          <defs>
+            <filter id="s" x="-25%" y="-25%" width="150%" height="150%">
+              <feDropShadow dx="0" dy="1" stdDeviation="2" flood-color="rgba(0,0,0,0.35)"/>
+            </filter>
+          </defs>
+          <path d="M16 2 L29 16 L16 30 L3 16 Z" fill="${c.bg}" stroke="${c.border}" stroke-width="1.5" filter="url(#s)"/>
+          <circle cx="16" cy="16" r="7" fill="white" fill-opacity="0.95"/>
+          <text x="16" y="19.5" text-anchor="middle" font-family="Inter,system-ui,sans-serif" font-size="9" font-weight="700" fill="${c.bg}">${label}</text>
+        </svg>`;
+      return 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg);
+    },
+
+    _showAiRoute(waypoints) {
+      this._clearAiRoute();
+      if (!waypoints || !waypoints.length || !this._map) return;
+
+      const path = [];
+      waypoints.forEach((wp, i) => {
+        const pos = { lat: wp.lat, lng: wp.lng };
+        path.push(pos);
+        let label, type;
+        if (i === 0) { type = 'takeoff'; label = 'T'; }
+        else if (i === waypoints.length - 1) { type = 'rtl'; label = 'R'; }
+        else { type = 'waypoint'; label = String(i); }
+
+        const marker = new google.maps.Marker({
+          position: pos,
+          map: this._map,
+          icon: {
+            url: this._createAiMarkerIcon(label, type),
+            scaledSize: new google.maps.Size(32, 32),
+            anchor: new google.maps.Point(16, 30)
+          },
+          title: `AI: ${wp.label || this._waypointLabel(type, i)}` + (wp.altitude_m ? ` (${wp.altitude_m}m)` : ''),
+          zIndex: 200 + i
+        });
+        this._aiMarkers.push(marker);
+      });
+
+      // Dashed polyline for AI route
+      this._aiPolyline = new google.maps.Polyline({
+        map: this._map,
+        path: path,
+        strokeColor: '#a855f7',
+        strokeOpacity: 0,
+        strokeWeight: 3,
+        geodesic: true,
+        icons: [{
+          icon: {
+            path: 'M 0,-1 0,1',
+            strokeOpacity: 0.8,
+            strokeColor: '#a855f7',
+            scale: 3
+          },
+          offset: '0',
+          repeat: '16px'
+        }]
+      });
+    },
+
+    _clearAiRoute() {
+      this._aiMarkers.forEach(m => m.setMap(null));
+      this._aiMarkers = [];
+      if (this._aiPolyline) {
+        this._aiPolyline.setMap(null);
+        this._aiPolyline = null;
+      }
+    },
+
+    // ═══════════════════════════════════════════
+    //  FLOATING PANEL RENDERERS
+    // ═══════════════════════════════════════════
+
+    _showWeatherPanel(w) {
+      const d = this._getDom();
+      const info = this._weatherCodeToInfo(w.weatherCode);
+      const compass = this._windDirToCompass(w.windDirection || 0);
+      const visKm = w.visibility != null ? (w.visibility / 1000).toFixed(1) : '—';
+
+      d.aiWeatherBody.innerHTML = `
+        <div class="weather-card weather-card-wide">
+          <span class="weather-card-icon">${info.icon}</span>
+          <span class="weather-card-value">${info.label}</span>
+          <span class="weather-card-label">Conditions</span>
+        </div>
+        <div class="weather-card">
+          <span class="weather-card-icon">🌡️</span>
+          <span class="weather-card-value">${w.temperature != null ? w.temperature + '°C' : '—'}</span>
+          <span class="weather-card-label">Temp</span>
+        </div>
+        <div class="weather-card">
+          <span class="weather-card-icon">💨</span>
+          <span class="weather-card-value">${w.windSpeed != null ? w.windSpeed + ' km/h' : '—'}</span>
+          <span class="weather-card-label">Wind ${compass}</span>
+        </div>
+        <div class="weather-card">
+          <span class="weather-card-icon">🌧️</span>
+          <span class="weather-card-value">${w.precipitationProb != null ? w.precipitationProb + '%' : '—'}</span>
+          <span class="weather-card-label">Rain</span>
+        </div>
+        <div class="weather-card">
+          <span class="weather-card-icon">👁️</span>
+          <span class="weather-card-value">${visKm} km</span>
+          <span class="weather-card-label">Visibility</span>
+        </div>`;
+
+      d.aiWeatherPanel.classList.add('visible');
+    },
+
+    _showBriefingPanel(briefing) {
+      if (!briefing) return;
+      const d = this._getDom();
+      const risk = (briefing.riskLevel || 'medium').toLowerCase();
+      d.aiBriefingRisk.textContent = risk.toUpperCase();
+      d.aiBriefingRisk.className = `ai-risk-badge risk-${risk}`;
+
+      const safetyItems = (briefing.safetyConsiderations || []).map(s => `<li>${s}</li>`).join('');
+      const recoItems = (briefing.recommendations || []).map(r => `<li>${r}</li>`).join('');
+
+      d.aiBriefingBody.innerHTML = `
+        <p class="briefing-summary">${briefing.summary || ''}</p>
+
+        <div class="briefing-stat-row">
+          <div class="briefing-stat">
+            <span class="briefing-stat-value">${briefing.estimatedFlightTime || '—'}</span>
+            <span class="briefing-stat-label">Flight Time</span>
+          </div>
+          <div class="briefing-stat">
+            <span class="briefing-stat-value">${briefing.maxAltitude || '—'}</span>
+            <span class="briefing-stat-label">Max Alt</span>
+          </div>
+          <div class="briefing-stat">
+            <span class="briefing-stat-value">${risk.charAt(0).toUpperCase() + risk.slice(1)}</span>
+            <span class="briefing-stat-label">Risk</span>
+          </div>
+        </div>
+
+        ${safetyItems ? `
+        <div class="briefing-block">
+          <div class="briefing-block-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="1.5" width="13" height="13">
+              <path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/>
+            </svg>
+            Safety
+          </div>
+          <ul class="briefing-list">${safetyItems}</ul>
+        </div>` : ''}
+
+        ${recoItems ? `
+        <div class="briefing-block">
+          <div class="briefing-block-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="1.5" width="13" height="13">
+              <path d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            Recommendations
+          </div>
+          <ul class="briefing-list">${recoItems}</ul>
+        </div>` : ''}`;
+
+      d.aiBriefingPanel.classList.add('visible');
+    },
+
+    _hideAiPanels() {
+      const d = this._getDom();
+      d.aiLoadingOverlay.classList.remove('visible');
+      d.aiControlBar.classList.remove('visible');
+      d.aiWeatherPanel.classList.remove('visible');
+      d.aiBriefingPanel.classList.remove('visible');
+      // Remove error toast if any
+      const toast = d.mapEl.parentElement.querySelector('.ai-error-toast');
+      if (toast) toast.remove();
+    },
+
+    _dismissAiRoute() {
+      this._clearAiRoute();
+      this._hideAiPanels();
+      this._lastAiResult = null;
+    },
+
+    _acceptAiRoute() {
+      if (!this._lastAiResult?.optimizedWaypoints) {
+        this._dismissAiRoute();
+        return;
+      }
+
+      // Clear user markers and AI overlay
+      this._markers.forEach(m => m.setMap(null));
+      this._markers = [];
+      this._clearAiRoute();
+      this._hideAiPanels();
+
+      // Re-add waypoints from AI result
+      for (const wp of this._lastAiResult.optimizedWaypoints) {
+        this._addWaypoint(wp.lat, wp.lng);
+      }
+      this._lastAiResult = null;
+    },
+
+    _replanMission() {
+      this._clearAiRoute();
+      this._hideAiPanels();
+      this._lastAiResult = null;
+      this._submitMission();
+    },
+
+    _showErrorToast(message) {
+      const d = this._getDom();
+      // Remove any existing toast
+      const existing = d.mapEl.parentElement.querySelector('.ai-error-toast');
+      if (existing) existing.remove();
+
+      const toast = document.createElement('div');
+      toast.className = 'ai-error-toast';
+      toast.innerHTML = `
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="20" height="20">
+          <path d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"/>
+        </svg>
+        <span>${message}</span>`;
+      d.mapEl.parentElement.appendChild(toast);
+
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => toast.classList.add('visible'));
+      });
+
+      setTimeout(() => {
+        toast.classList.remove('visible');
+        setTimeout(() => toast.remove(), 400);
+      }, 8000);
     }
   };
 
