@@ -6,6 +6,7 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
+    "postinstall": "electron-rebuild -f -w better-sqlite3",
     "build:mac": "electron-builder --mac",
     "build:win": "electron-builder --win",
     "build:web": "mkdir -p dist/web && cp -r src/renderer/* dist/web/"
@@ -43,10 +44,12 @@
   "author": "Helios Team",
   "license": "MIT",
   "devDependencies": {
+    "@electron/rebuild": "^3.7.2",
     "electron": "^33.0.0",
     "electron-builder": "^25.0.0"
   },
   "dependencies": {
+    "better-sqlite3": "^12.6.2",
     "chart.js": "^4.5.1",
     "dotenv": "^17.2.4"
   }

@@ -1,7 +1,10 @@
 /* ── Dashboard Module ── */
 
+let _navigate = null;
+
 export const Dashboard = {
-  init(pillCards) {
+  init(pillCards, { navigate } = {}) {
+    _navigate = navigate;
     pillCards.forEach(card => {
       card.addEventListener('click', () => {
         this._handleAction(card.dataset.action);
@@ -30,8 +33,8 @@ export const Dashboard = {
       case 'documentation':
         console.log('Opening documentation...');
         break;
-      case 'connect':
-        console.log('Opening drone connection...');
+      case 'fleet':
+        if (_navigate) _navigate('fleet');
         break;
       case 'join':
         console.log('Opening join flow...');

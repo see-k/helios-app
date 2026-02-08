@@ -16,6 +16,7 @@
   <link rel="stylesheet" href="css/missions.css">
   <link rel="stylesheet" href="css/droneview.css">
   <link rel="stylesheet" href="css/reports.css">
+  <link rel="stylesheet" href="css/fleet.css">
   <link rel="stylesheet" href="css/animations.css">
 </head>
 <body>
@@ -98,14 +99,14 @@
           <span class="pill-description">Explore guides & APIs</span>
         </button>
 
-        <button class="pill-card" data-action="connect">
+        <button class="pill-card" data-action="fleet">
           <div class="pill-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <path d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m9.915-3.173a4.5 4.5 0 00-1.242-7.244l4.5-4.5a4.5 4.5 0 016.364 6.364l-1.757 1.757"/>
+              <path d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"/>
             </svg>
           </div>
-          <span class="pill-label">Connect</span>
-          <span class="pill-description">Link your drone fleet</span>
+          <span class="pill-label">Fleet</span>
+          <span class="pill-description">Manage your drone fleet</span>
         </button>
 
         <button class="pill-card" data-action="join">
@@ -598,6 +599,120 @@
       </div>
     </section>
 
+    <!-- Fleet Page -->
+    <section class="page-section" id="pageFleet" style="display:none;">
+      <div class="fleet-container">
+        <!-- Header -->
+        <div class="fleet-header">
+          <div class="fleet-header-left">
+            <div class="fleet-header-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"/>
+              </svg>
+            </div>
+            <div class="fleet-header-text">
+              <h2>Fleet Management <span class="fleet-drone-count" id="fleetDroneCount">0</span></h2>
+              <p>Monitor, add, and manage your drones</p>
+            </div>
+          </div>
+          <div class="fleet-header-actions">
+            <button class="fleet-btn" id="btnRefreshFleet">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="16" height="16"><path d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182"/></svg>
+              Refresh
+            </button>
+            <button class="fleet-btn fleet-btn-primary" id="btnAddDrone">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M12 5v14m-7-7h14"/></svg>
+              Add Drone
+            </button>
+          </div>
+        </div>
+
+        <!-- Empty State -->
+        <div class="fleet-empty-state" id="fleetEmptyState">
+          <div class="fleet-empty-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"/>
+            </svg>
+          </div>
+          <h3 class="fleet-empty-title">No Drones Yet</h3>
+          <p class="fleet-empty-desc">Add your first drone to start managing your fleet. You can configure connection details, monitor status, and ping devices.</p>
+        </div>
+
+        <!-- Drone List -->
+        <div class="fleet-drone-list" id="fleetDroneList"></div>
+
+        <!-- Add/Edit Form Overlay -->
+        <div class="fleet-form-overlay" id="fleetFormOverlay">
+          <div class="fleet-form-modal">
+            <div class="fleet-form-header">
+              <h3 class="fleet-form-title" id="fleetFormTitle">Add New Drone</h3>
+              <button class="fleet-form-close" id="btnCancelDrone" title="Close">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 18L18 6M6 6l12 12"/></svg>
+              </button>
+            </div>
+            <form class="fleet-form" id="droneForm" autocomplete="off">
+              <div class="fleet-form-row">
+                <div class="fleet-form-group">
+                  <label class="fleet-form-label" for="droneName">Name <span class="required">*</span></label>
+                  <input type="text" id="droneName" class="fleet-form-input" placeholder="e.g. Helios Scout 1" required>
+                </div>
+                <div class="fleet-form-group">
+                  <label class="fleet-form-label" for="droneHostname">Hostname / IP <span class="required">*</span></label>
+                  <input type="text" id="droneHostname" class="fleet-form-input" placeholder="e.g. 192.168.1.100" required>
+                </div>
+              </div>
+              <div class="fleet-form-row">
+                <div class="fleet-form-group">
+                  <label class="fleet-form-label" for="droneStatus">Status</label>
+                  <select id="droneStatus" class="fleet-form-select">
+                    <option value="offline">Offline</option>
+                    <option value="online">Online</option>
+                    <option value="maintenance">Maintenance</option>
+                    <option value="in-flight">In Flight</option>
+                    <option value="error">Error</option>
+                  </select>
+                </div>
+                <div class="fleet-form-group">
+                  <label class="fleet-form-label" for="droneType">Drone Type</label>
+                  <select id="droneType" class="fleet-form-select">
+                    <option value="quadcopter">Quadcopter</option>
+                    <option value="hexacopter">Hexacopter</option>
+                    <option value="octocopter">Octocopter</option>
+                    <option value="fixed-wing">Fixed Wing</option>
+                    <option value="vtol">VTOL Hybrid</option>
+                    <option value="evtol">eVTOL</option>
+                  </select>
+                </div>
+              </div>
+              <div class="fleet-form-row">
+                <div class="fleet-form-group">
+                  <label class="fleet-form-label" for="fleetDroneModel">Model</label>
+                  <input type="text" id="fleetDroneModel" class="fleet-form-input" placeholder="e.g. Helios X1">
+                </div>
+                <div class="fleet-form-group">
+                  <label class="fleet-form-label" for="droneSerial">Serial Number</label>
+                  <input type="text" id="droneSerial" class="fleet-form-input" placeholder="e.g. HLX-0042">
+                </div>
+              </div>
+              <div class="fleet-form-group">
+                <label class="fleet-form-label" for="droneNotes">Notes</label>
+                <textarea id="droneNotes" class="fleet-form-textarea" placeholder="Optional notes about this drone..." rows="3"></textarea>
+              </div>
+              <div class="fleet-form-actions">
+                <button type="button" class="fleet-form-btn" id="btnCancelDroneForm" onclick="document.getElementById('fleetFormOverlay').classList.remove('visible')">
+                  Cancel
+                </button>
+                <button type="submit" class="fleet-form-btn fleet-form-btn-submit">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><path d="M12 5v14m-7-7h14"/></svg>
+                  <span id="fleetFormSubmitLabel">Add Drone</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- Reports Page -->
     <section class="page-section" id="pageReports" style="display:none;">
       <div class="reports-container" id="reportsContent">
@@ -622,6 +737,11 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
             <path d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"/>
             <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+          </svg>
+        </button>
+        <button class="nav-item" data-page="fleet" data-tooltip="Fleet">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"/>
           </svg>
         </button>
         <button class="nav-item" data-page="reports" data-tooltip="Reports">

@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, nativeTheme, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const database = require('./database');
 
 // Load .env from project root
 require('dotenv').config({ path: path.join(__dirname, '../../.env') });
@@ -93,9 +94,21 @@ ipcMain.handle('export-pdf', async () => {
   }
 });
 
-app.whenReady().then(createWindow);
+// ── Fleet / Drone CRUD IPC ──
+ipcMain.handle('fleet-get-all', () => database.getAllDrones());
+ipcMain.handle('fleet-get', (event, id) => database.getDroneById(id));
+ipcMain.handle('fleet-add', (event, data) => database.addDrone(data));
+ipcMain.handle('fleet-update', (event, id, data) => database.updateDrone(id, data));
+ipcMain.handle('fleet-delete', (event, id) => database.deleteDrone(id));
+ipcMain.handle('fleet-ping', (event, id) => database.pingDrone(id));
+
+app.whenReady().then(() => {
+  database.initDatabase();
+  createWindow();
+});
 
 app.on('window-all-closed', () => {
+  database.closeDatabase();
   if (process.platform !== 'darwin') {
     app.quit();
   }

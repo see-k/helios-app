@@ -8,6 +8,7 @@ import { Dashboard } from './modules/dashboard.js';
 import { Missions } from './modules/missions.js';
 import { DroneView } from './modules/droneview.js';
 import { Reports } from './modules/reports.js';
+import { Fleet } from './modules/fleet.js';
 
 // ── DOM References ──
 const dom = {
@@ -18,6 +19,7 @@ const dom = {
   mainContent: document.getElementById('mainContent'),
   pageMissions: document.getElementById('pageMissions'),
   pageDroneView: document.getElementById('pageDroneView'),
+  pageFleet: document.getElementById('pageFleet'),
   pageReports: document.getElementById('pageReports')
 };
 
@@ -43,6 +45,12 @@ const pages = {
     showModel: false,
     onEnter: () => DroneView.onEnter(),
     onLeave: () => DroneView.onLeave()
+  },
+  fleet: {
+    el: () => dom.pageFleet,
+    showModel: false,
+    onEnter: () => Fleet.onEnter(),
+    onLeave: () => Fleet.onLeave()
   },
   reports: {
     el: () => dom.pageReports,
@@ -84,7 +92,7 @@ async function init() {
   Navigation.init(dom.navItems, dom.modelBackground, pages);
 
   // Dashboard pill cards
-  Dashboard.init(dom.pillCards);
+  Dashboard.init(dom.pillCards, { navigate });
 
   // Missions (callbacks for cross-module actions)
   Missions.init({
@@ -97,6 +105,9 @@ async function init() {
 
   // Reports
   Reports.init({ navigate });
+
+  // Fleet
+  Fleet.init({ navigate });
 
   // Global events
   bindEvents();
