@@ -94,6 +94,23 @@ ipcMain.handle('export-pdf', async () => {
   }
 });
 
+// ── Fleet / Drone connection test ──
+ipcMain.handle('fleet-test-connection', async (event, hostname) => {
+  const http = require('http');
+  const url = `http://${hostname}:5000/api/status`;
+  return new Promise((resolve) => {
+    const req = http.get(url, { timeout: 5000 }, (res) => {
+      let body = '';
+      res.on('data', (chunk) => body += chunk);
+      res.on('end', () => {
+        resolve({ success: res.statusCode === 200, statusCode: res.statusCode, body });
+      });
+    });
+    req.on('error', (err) => resolve({ success: false, error: err.message }));
+    req.on('timeout', () => { req.destroy(); resolve({ success: false, error: 'Connection timed out' }); });
+  });
+});
+
 // ── Fleet / Drone CRUD IPC ──
 ipcMain.handle('fleet-get-all', () => database.getAllDrones());
 ipcMain.handle('fleet-get', (event, id) => database.getDroneById(id));

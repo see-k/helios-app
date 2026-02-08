@@ -4,6 +4,7 @@ import { state } from '../state.js';
 let _navigate = null;
 let _drones = [];
 let _editingId = null;
+let _connectionVerified = false;
 
 /* ── Icon SVGs ── */
 const icons = {
@@ -57,6 +58,10 @@ export const Fleet = {
     document.getElementById('fleetFormOverlay')?.addEventListener('click', (e) => {
       if (e.target === e.currentTarget) this._hideForm();
     });
+    // Test connection button
+    document.getElementById('btnTestConnection')?.addEventListener('click', () => this._testConnection());
+    // Reset connection state when hostname changes
+    document.getElementById('droneHostname')?.addEventListener('input', () => this._resetConnectionState());
   },
 
   async onEnter() {
@@ -146,6 +151,7 @@ export const Fleet = {
               <span>Delete</span>
             </button>
           </div>
+          <div class="fleet-ping-result" id="pingResult-${drone.id}"></div>
         </div>
       `;
     }).join('');
@@ -165,14 +171,121 @@ export const Fleet = {
 
   /* ── Actions ── */
   async _pingDrone(id, btn) {
+    const drone = _drones.find(d => d.id === id);
+    if (!drone) return;
+
     btn.classList.add('pinging');
+    const resultEl = document.getElementById(`pingResult-${id}`);
+
+    // Show loading state in result area
+    if (resultEl) {
+      resultEl.innerHTML = `<div class="fleet-ping-loading"><div class="fleet-btn-spinner" style="display:inline-block"></div><span>Contacting ${this._esc(drone.hostname)}:5000...</span></div>`;
+      resultEl.classList.add('visible');
+    }
+
     try {
+      const result = await window.helios.fleetTestConnection(drone.hostname);
+
+      // Update last_ping timestamp in DB
       await window.helios.fleetPing(id);
-      await this._loadDrones();
+
+      if (result.success) {
+        const body = typeof result.body === 'string' ? JSON.parse(result.body) : result.body;
+        if (resultEl) {
+          resultEl.innerHTML = this._renderPingResult(body, drone.hostname);
+          resultEl.classList.add('visible', 'success');
+          resultEl.classList.remove('error');
+        }
+      } else {
+        const errMsg = result.error || `HTTP ${result.statusCode}`;
+        if (resultEl) {
+          resultEl.innerHTML = this._renderPingError(errMsg);
+          resultEl.classList.add('visible', 'error');
+          resultEl.classList.remove('success');
+        }
+      }
+
+      // Refresh data for last_ping update
+      _drones = await window.helios.fleetGetAll();
+      // Update the Last Ping value on card without full re-render
+      const card = document.querySelector(`.fleet-drone-card[data-drone-id="${id}"]`);
+      if (card) {
+        const updatedDrone = _drones.find(d => d.id === id);
+        if (updatedDrone) {
+          const detailItems = card.querySelectorAll('.fleet-detail-item');
+          detailItems.forEach(item => {
+            const label = item.querySelector('.fleet-detail-label');
+            if (label && label.textContent === 'Last Ping') {
+              const val = item.querySelector('.fleet-detail-value');
+              if (val) val.textContent = new Date(updatedDrone.last_ping + 'Z').toLocaleString();
+            }
+          });
+        }
+      }
     } catch (err) {
       console.error('Ping failed:', err);
+      if (resultEl) {
+        resultEl.innerHTML = this._renderPingError(err.message);
+        resultEl.classList.add('visible', 'error');
+        resultEl.classList.remove('success');
+      }
     }
-    setTimeout(() => btn.classList.remove('pinging'), 1000);
+
+    setTimeout(() => btn.classList.remove('pinging'), 600);
+  },
+
+  _renderPingResult(data, hostname) {
+    const connected = data.connected ? 'Connected' : 'Disconnected';
+    const connClass = data.connected ? 'online' : 'offline';
+    const droneAddr = data.drone_address || '—';
+    const wsRate = data.ws_rate_hz != null ? `${data.ws_rate_hz} Hz` : '—';
+    const startedAt = data.started_at ? new Date(data.started_at).toLocaleString() : '—';
+    const lastUpdated = data.last_updated ? new Date(data.last_updated).toLocaleString() : '—';
+
+    return `
+      <div class="fleet-ping-header">
+        <div class="fleet-ping-status ${connClass}">
+          <span class="fleet-ping-dot"></span>
+          ${connected}
+        </div>
+        <button class="fleet-ping-close" onclick="this.closest('.fleet-ping-result').classList.remove('visible','success','error');this.closest('.fleet-ping-result').innerHTML='';" title="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="fleet-ping-grid">
+        <div class="fleet-ping-item">
+          <span class="fleet-ping-label">Drone Address</span>
+          <span class="fleet-ping-value">${this._esc(droneAddr)}</span>
+        </div>
+        <div class="fleet-ping-item">
+          <span class="fleet-ping-label">WS Rate</span>
+          <span class="fleet-ping-value">${this._esc(wsRate)}</span>
+        </div>
+        <div class="fleet-ping-item">
+          <span class="fleet-ping-label">Started At</span>
+          <span class="fleet-ping-value">${this._esc(startedAt)}</span>
+        </div>
+        <div class="fleet-ping-item">
+          <span class="fleet-ping-label">Last Updated</span>
+          <span class="fleet-ping-value">${this._esc(lastUpdated)}</span>
+        </div>
+      </div>
+    `;
+  },
+
+  _renderPingError(errMsg) {
+    return `
+      <div class="fleet-ping-header">
+        <div class="fleet-ping-status offline">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"/></svg>
+          Connection Failed
+        </div>
+        <button class="fleet-ping-close" onclick="this.closest('.fleet-ping-result').classList.remove('visible','success','error');this.closest('.fleet-ping-result').innerHTML='';" title="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <p class="fleet-ping-error-msg">${this._esc(errMsg)}</p>
+    `;
   },
 
   _editDrone(id) {
@@ -205,11 +318,32 @@ export const Fleet = {
     const overlay = document.getElementById('fleetFormOverlay');
     const title = document.getElementById('fleetFormTitle');
     const submitLabel = document.getElementById('fleetFormSubmitLabel');
+    const sbcNotice = document.getElementById('fleetSbcNotice');
+    const submitBtn = document.getElementById('btnSubmitDrone');
+    const testBtn = document.getElementById('btnTestConnection');
+    const connResult = document.getElementById('fleetConnResult');
     if (!overlay) return;
 
     _editingId = drone ? drone.id : null;
+    _connectionVerified = false;
+
     if (title) title.textContent = drone ? 'Edit Drone' : 'Add New Drone';
     if (submitLabel) submitLabel.textContent = drone ? 'Save Changes' : 'Add Drone';
+
+    // Show SBC notice & test button only for new drones
+    const isNew = !drone;
+    if (sbcNotice) sbcNotice.style.display = isNew ? '' : 'none';
+    if (testBtn) testBtn.style.display = isNew ? '' : 'none';
+    if (connResult) { connResult.innerHTML = ''; connResult.className = 'fleet-conn-result'; }
+
+    // For edit mode show submit immediately, for add mode require test first
+    if (submitBtn) {
+      if (isNew) {
+        submitBtn.classList.add('fleet-form-btn-hidden');
+      } else {
+        submitBtn.classList.remove('fleet-form-btn-hidden');
+      }
+    }
 
     // Fill form
     document.getElementById('droneName').value = drone?.name || '';
@@ -228,7 +362,80 @@ export const Fleet = {
     const overlay = document.getElementById('fleetFormOverlay');
     if (overlay) overlay.classList.remove('visible');
     _editingId = null;
+    _connectionVerified = false;
     document.getElementById('droneForm')?.reset();
+    const connResult = document.getElementById('fleetConnResult');
+    if (connResult) { connResult.innerHTML = ''; connResult.className = 'fleet-conn-result'; }
+  },
+
+  _resetConnectionState() {
+    if (_editingId) return; // skip for edit mode
+    _connectionVerified = false;
+    const submitBtn = document.getElementById('btnSubmitDrone');
+    const connResult = document.getElementById('fleetConnResult');
+    if (submitBtn) submitBtn.classList.add('fleet-form-btn-hidden');
+    if (connResult) { connResult.innerHTML = ''; connResult.className = 'fleet-conn-result'; }
+  },
+
+  async _testConnection() {
+    const hostname = document.getElementById('droneHostname')?.value.trim();
+    const testBtn = document.getElementById('btnTestConnection');
+    const spinner = document.getElementById('btnTestSpinner');
+    const label = document.getElementById('btnTestConnectionLabel');
+    const connResult = document.getElementById('fleetConnResult');
+    const submitBtn = document.getElementById('btnSubmitDrone');
+
+    if (!hostname) {
+      document.getElementById('droneHostname')?.focus();
+      return;
+    }
+
+    // Show loading state
+    if (testBtn) testBtn.disabled = true;
+    if (spinner) spinner.style.display = 'inline-block';
+    if (label) label.textContent = 'Testing...';
+    if (connResult) { connResult.innerHTML = ''; connResult.className = 'fleet-conn-result'; }
+
+    try {
+      const result = await window.helios.fleetTestConnection(hostname);
+
+      if (result.success) {
+        _connectionVerified = true;
+        if (connResult) {
+          connResult.className = 'fleet-conn-result fleet-conn-success';
+          connResult.innerHTML = `
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            <span>Connection successful — Helios SBC Service is running on <strong>${this._esc(hostname)}:5000</strong></span>
+          `;
+        }
+        if (submitBtn) submitBtn.classList.remove('fleet-form-btn-hidden');
+      } else {
+        _connectionVerified = false;
+        const errMsg = result.error || `HTTP ${result.statusCode}`;
+        if (connResult) {
+          connResult.className = 'fleet-conn-result fleet-conn-error';
+          connResult.innerHTML = `
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"/></svg>
+            <span>Connection failed: ${this._esc(errMsg)}. Make sure the <strong>Helios SBC Service</strong> is running on the drone.</span>
+          `;
+        }
+        if (submitBtn) submitBtn.classList.add('fleet-form-btn-hidden');
+      }
+    } catch (err) {
+      _connectionVerified = false;
+      if (connResult) {
+        connResult.className = 'fleet-conn-result fleet-conn-error';
+        connResult.innerHTML = `
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"/></svg>
+          <span>Connection failed: ${this._esc(err.message)}</span>
+        `;
+      }
+      if (submitBtn) submitBtn.classList.add('fleet-form-btn-hidden');
+    } finally {
+      if (testBtn) testBtn.disabled = false;
+      if (spinner) spinner.style.display = 'none';
+      if (label) label.textContent = 'Test Connection';
+    }
   },
 
   async _saveDrone() {

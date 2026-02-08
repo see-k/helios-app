@@ -395,6 +395,128 @@
   100% { box-shadow: 0 0 0 0 rgba(34,197,94,0); }
 }
 
+/* ── Ping Result Panel ── */
+.fleet-ping-result {
+  display: none;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  padding: 0;
+  overflow: hidden;
+  transition: all 0.25s ease;
+}
+
+.fleet-ping-result.visible {
+  display: block;
+  padding: 14px 16px;
+}
+
+.fleet-ping-result.success {
+  background: rgba(34, 197, 94, 0.04);
+}
+
+.fleet-ping-result.error {
+  background: rgba(239, 68, 68, 0.04);
+}
+
+.fleet-ping-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.fleet-ping-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.fleet-ping-status.online {
+  color: #22c55e;
+}
+
+.fleet-ping-status.offline {
+  color: #ef4444;
+}
+
+.fleet-ping-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.fleet-ping-status.online .fleet-ping-dot {
+  background: #22c55e;
+  box-shadow: 0 0 6px rgba(34, 197, 94, 0.5);
+}
+
+.fleet-ping-status.offline .fleet-ping-dot {
+  background: #ef4444;
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.5);
+}
+
+.fleet-ping-close {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.fleet-ping-close:hover {
+  color: var(--text-primary);
+  background: rgba(255,255,255,0.06);
+}
+
+.fleet-ping-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.fleet-ping-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.fleet-ping-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.fleet-ping-value {
+  font-size: 13px;
+  color: var(--text-primary);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  word-break: break-all;
+}
+
+.fleet-ping-error-msg {
+  margin: 0;
+  font-size: 13px;
+  color: #ef4444;
+  line-height: 1.5;
+}
+
+.fleet-ping-loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
 .fleet-btn-edit:hover {
   color: #3b82f6;
   border-color: rgba(59,130,246,0.3);
@@ -617,6 +739,159 @@
   height: 15px;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+/* Hidden submit (before connection test) */
+.fleet-form-btn-hidden {
+  display: none !important;
+}
+
+/* Test connection button */
+.fleet-form-btn-test {
+  background: rgba(59, 130, 246, 0.1);
+  border-color: rgba(59, 130, 246, 0.25);
+  color: #3b82f6;
+  font-weight: 600;
+  position: relative;
+}
+
+.fleet-form-btn-test:hover {
+  background: rgba(59, 130, 246, 0.18);
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
+.fleet-form-btn-test:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.fleet-form-btn-test svg {
+  width: 15px;
+  height: 15px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fleet-btn-spinner {
+  display: none;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(59, 130, 246, 0.25);
+  border-top-color: #3b82f6;
+  border-radius: 50%;
+  animation: fleetSpin 0.6s linear infinite;
+}
+
+@keyframes fleetSpin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── SBC Service Notice ── */
+.fleet-sbc-notice {
+  display: flex;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: rgba(59, 130, 246, 0.06);
+  border: 1px solid rgba(59, 130, 246, 0.15);
+  margin-bottom: 8px;
+}
+
+.fleet-sbc-notice-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-start;
+  padding-top: 1px;
+  color: #3b82f6;
+}
+
+.fleet-sbc-notice-icon svg {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fleet-sbc-notice-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fleet-sbc-notice-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.fleet-sbc-notice-text strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.fleet-sbc-notice-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #3b82f6;
+  text-decoration: none;
+  transition: color var(--transition-fast);
+}
+
+.fleet-sbc-notice-link:hover {
+  color: #60a5fa;
+  text-decoration: underline;
+}
+
+.fleet-sbc-notice-link svg {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ── Connection Test Result ── */
+.fleet-conn-result {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 0;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  transition: all 0.2s ease;
+}
+
+.fleet-conn-result:empty {
+  display: none;
+}
+
+.fleet-conn-result svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fleet-conn-success {
+  padding: 12px 14px;
+  background: rgba(34, 197, 94, 0.06);
+  border: 1px solid rgba(34, 197, 94, 0.2);
+  color: #22c55e;
+}
+
+.fleet-conn-success strong {
+  color: #4ade80;
+}
+
+.fleet-conn-error {
+  padding: 12px 14px;
+  background: rgba(239, 68, 68, 0.06);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+}
+
+.fleet-conn-error strong {
+  color: #f87171;
 }
 
 /* ── Responsive ── */

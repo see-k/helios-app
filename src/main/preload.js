@@ -10,6 +10,9 @@ contextBridge.exposeInMainWorld('helios', {
   exportPdf: () => ipcRenderer.invoke('export-pdf'),
   isElectron: true,
 
+  // Fleet connection test
+  fleetTestConnection: (hostname) => ipcRenderer.invoke('fleet-test-connection', hostname),
+
   // Fleet / Drone CRUD
   fleetGetAll: () => ipcRenderer.invoke('fleet-get-all'),
   fleetGet: (id) => ipcRenderer.invoke('fleet-get', id),
