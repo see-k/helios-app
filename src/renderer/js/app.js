@@ -8,7 +8,8 @@
   // ── State ──
   const state = {
     theme: 'dark',
-    activePage: 'dashboard'
+    activePage: 'dashboard',
+    flightData: null // Populated when a mission finishes
   };
 
   // ── DOM References ──
@@ -21,7 +22,8 @@
     // Pages
     mainContent: document.getElementById('mainContent'),
     pageMissions: document.getElementById('pageMissions'),
-    pageDroneView: document.getElementById('pageDroneView')
+    pageDroneView: document.getElementById('pageDroneView'),
+    pageReports: document.getElementById('pageReports')
   };
 
   // ── Page registry ──
@@ -43,6 +45,12 @@
       showModel: false,
       onEnter: () => DroneView.onEnter(),
       onLeave: () => DroneView.onLeave()
+    },
+    reports: {
+      el: () => dom.pageReports,
+      showModel: false,
+      onEnter: () => Reports.onEnter(),
+      onLeave: () => Reports.onLeave()
     }
   };
 
@@ -1116,6 +1124,9 @@ RULES:
     _weatherInterval: null,
     _simIndex: 0,
     _simFraction: 0,
+    _missionStartTime: null,
+    _missionComplete: false,
+    _flightLog: [],
     _dom: null,
 
     // Simulated mission waypoints (San Francisco area)
@@ -1180,7 +1191,14 @@ RULES:
         // Collapse / Expand
         telemetryPanel: document.getElementById('dvTelemetryPanel'),
         btnCollapse: document.getElementById('btnCollapseTelemetry'),
-        btnExpand: document.getElementById('btnExpandTelemetry')
+        btnExpand: document.getElementById('btnExpandTelemetry'),
+        // Mission complete
+        missionCompleteOverlay: document.getElementById('dvMissionComplete'),
+        mcDuration: document.getElementById('dvMcDuration'),
+        mcDistance: document.getElementById('dvMcDistance'),
+        mcBattery: document.getElementById('dvMcBattery'),
+        btnViewReport: document.getElementById('btnViewReport'),
+        btnRestartMission: document.getElementById('btnRestartMission')
       };
       return this._dom;
     },
@@ -1195,6 +1213,16 @@ RULES:
       // Panel collapse/expand
       d.btnCollapse.addEventListener('click', () => this._togglePanel(false));
       d.btnExpand.addEventListener('click', () => this._togglePanel(true));
+      // Mission complete buttons
+      d.btnViewReport.addEventListener('click', () => {
+        d.missionCompleteOverlay.classList.remove('visible');
+        Navigation.setActive('reports');
+      });
+      d.btnRestartMission.addEventListener('click', () => {
+        d.missionCompleteOverlay.classList.remove('visible');
+        this._missionComplete = false;
+        this._startSimulation();
+      });
     },
 
     _togglePanel(show) {
@@ -1217,7 +1245,7 @@ RULES:
         this._waitForMaps();
       } else if (this._map) {
         google.maps.event.trigger(this._map, 'resize');
-        this._startSimulation();
+        if (!this._missionComplete) this._startSimulation();
       }
     },
 
@@ -1355,7 +1383,14 @@ RULES:
       this._simIndex = 0;
       this._simFraction = 0;
       this._telemetry.battery = 100;
+      this._missionComplete = false;
+      this._missionStartTime = Date.now();
+      this._flightLog = [
+        { time: new Date().toISOString(), event: 'launch', detail: 'Drone powered up and launched from base' }
+      ];
       if (this._trailPolyline) this._trailPolyline.setPath([]);
+      // Hide mission complete overlay
+      this._getDom().missionCompleteOverlay.classList.remove('visible');
 
       const stepsPerSegment = 600; // smooth, realistic movement
       const intervalMs = 100; // 10fps
@@ -1363,11 +1398,8 @@ RULES:
       this._simInterval = setInterval(() => {
         const wps = this._missionWaypoints;
         if (this._simIndex >= wps.length - 1) {
-          // Mission complete — loop
-          this._simIndex = 0;
-          this._simFraction = 0;
-          this._telemetry.battery = 100;
-          if (this._trailPolyline) this._trailPolyline.setPath([]);
+          // Mission complete — stop and show overlay
+          this._completeMission();
           return;
         }
 
@@ -1375,6 +1407,15 @@ RULES:
         if (this._simFraction >= 1) {
           this._simFraction = 0;
           this._simIndex++;
+          // Log waypoint reached
+          if (this._simIndex < wps.length) {
+            const reachedWp = wps[this._simIndex];
+            this._flightLog.push({
+              time: new Date().toISOString(),
+              event: reachedWp.type === 'rtl' ? 'land' : 'waypoint',
+              detail: `${reachedWp.label} reached at altitude ${reachedWp.alt}m`
+            });
+          }
           if (this._simIndex >= wps.length - 1) return;
         }
 
@@ -1436,6 +1477,61 @@ RULES:
         clearInterval(this._weatherInterval);
         this._weatherInterval = null;
       }
+    },
+
+    _completeMission() {
+      this._stopSimulation();
+      this._missionComplete = true;
+
+      const d = this._getDom();
+      const wps = this._missionWaypoints;
+      const elapsed = Date.now() - this._missionStartTime;
+      const durationMin = Math.round(elapsed / 60000);
+      const durationStr = durationMin < 1 ? '<1 min' : durationMin + ' min';
+
+      // Compute total distance
+      let totalDist = 0;
+      for (let i = 1; i < wps.length; i++) {
+        totalDist += Missions._haversine(wps[i - 1].lat, wps[i - 1].lng, wps[i].lat, wps[i].lng);
+      }
+      const distStr = totalDist >= 1000 ? (totalDist / 1000).toFixed(1) + ' km' : Math.round(totalDist) + ' m';
+      const batteryLeft = Math.round(this._telemetry.battery) + '%';
+
+      // Add landing log
+      this._flightLog.push({ time: new Date().toISOString(), event: 'land', detail: 'Drone landed safely at launch site' });
+
+      // Show overlay stats
+      d.mcDuration.textContent = durationStr;
+      d.mcDistance.textContent = distStr;
+      d.mcBattery.textContent = batteryLeft;
+      d.missionCompleteOverlay.classList.add('visible');
+
+      // Final update
+      this._updateProgress();
+      this._updateWaypointStatuses();
+
+      // Store flight data for Reports
+      state.flightData = {
+        droneModel: 'Helios X1 — Recon',
+        droneId: 'HLX-0042',
+        missionStart: new Date(this._missionStartTime).toISOString(),
+        missionEnd: new Date().toISOString(),
+        durationMs: elapsed,
+        durationStr,
+        totalDistanceM: totalDist,
+        distanceStr: distStr,
+        batteryStart: 100,
+        batteryEnd: Math.round(this._telemetry.battery),
+        waypointsVisited: wps.length,
+        maxAltitude: Math.max(...wps.map(w => w.alt)),
+        avgSpeed: +(42 + Math.random() * 6).toFixed(1),
+        maxSpeed: +(48 + Math.random() * 8).toFixed(1),
+        satellites: this._telemetry.satellites,
+        weatherSummary: this._getDom().weatherCondition.textContent || 'Unknown',
+        flightLog: [...this._flightLog],
+        waypoints: wps.map(w => ({ ...w })),
+        telemetrySnapshot: { ...this._telemetry }
+      };
     },
 
     _bearing(lat1, lng1, lat2, lng2) {
@@ -1903,6 +1999,426 @@ RULES:
     }
   };
 
+  // ════════════════════════════════════════════
+  //  REPORTS - Post-Flight Report & AI Assessment
+  // ════════════════════════════════════════════
+  const Reports = {
+    _dom: null,
+    _aiResult: null,
+
+    _getDom() {
+      if (this._dom) return this._dom;
+      this._dom = {
+        container: document.getElementById('reportsContent')
+      };
+      return this._dom;
+    },
+
+    init() {
+      // Nothing to wire until page renders
+    },
+
+    onEnter() {
+      this._render();
+    },
+
+    onLeave() {
+      // Preserve state
+    },
+
+    _render() {
+      const d = this._getDom();
+      const fd = state.flightData;
+
+      if (!fd) {
+        d.container.innerHTML = `
+          <div class="rpt-no-data">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="56" height="56">
+              <path d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/>
+            </svg>
+            <h2 class="rpt-no-data-title">No Flight Data</h2>
+            <p class="rpt-no-data-text">Complete a drone flight simulation to generate a flight report with logs, performance data, and AI assessment.</p>
+            <button class="rpt-no-data-btn" id="rptGoToDrone">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                <path d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"/>
+                <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+              </svg>
+              Go to Drone View
+            </button>
+          </div>`;
+        d.container.querySelector('#rptGoToDrone')?.addEventListener('click', () => Navigation.setActive('droneview'));
+        return;
+      }
+
+      const startDate = new Date(fd.missionStart);
+      const endDate = new Date(fd.missionEnd);
+      const dateStr = startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      const startTime = startDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+      const endTime = endDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+      const batteryUsed = fd.batteryStart - fd.batteryEnd;
+      const efficiencyPct = Math.max(60, Math.min(98, Math.round(100 - batteryUsed * 0.4 + Math.random() * 8)));
+      const gpsAccuracy = (1.2 + Math.random() * 0.6).toFixed(1);
+
+      // Build flight log rows
+      const logRows = fd.flightLog.map(l => {
+        const t = new Date(l.time);
+        const timeStr = t.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        const badgeClass = l.event === 'launch' ? 'launch' : l.event === 'land' ? 'land' : l.event === 'warning' ? 'warning' : 'waypoint';
+        const label = l.event === 'launch' ? 'Launch' : l.event === 'land' ? 'Landing' : l.event === 'warning' ? 'Warning' : 'Waypoint';
+        return `<tr>
+          <td class="rpt-log-time">${timeStr}</td>
+          <td><span class="rpt-log-event-badge ${badgeClass}">${label}</span></td>
+          <td class="rpt-log-detail">${l.detail}</td>
+        </tr>`;
+      }).join('');
+
+      d.container.innerHTML = `
+        <!-- Header -->
+        <div class="rpt-header">
+          <div class="rpt-header-left">
+            <h1 class="rpt-page-title">Flight Report</h1>
+            <p class="rpt-page-subtitle">${fd.droneModel} \u2022 ${fd.droneId} \u2022 ${dateStr}</p>
+          </div>
+          <div class="rpt-header-actions">
+            <span class="rpt-header-badge rpt-badge-demo">Simulated</span>
+            <span class="rpt-header-badge rpt-badge-complete">Complete</span>
+          </div>
+        </div>
+
+        <!-- Mission Info Bar -->
+        <div class="rpt-mission-bar">
+          <div class="rpt-mission-item">
+            <span class="rpt-mission-icon">\u2708\uFE0F</span>
+            <div class="rpt-mission-info">
+              <span class="rpt-mission-label">Drone</span>
+              <span class="rpt-mission-value">${fd.droneModel}</span>
+            </div>
+          </div>
+          <div class="rpt-mission-divider"></div>
+          <div class="rpt-mission-item">
+            <span class="rpt-mission-icon">\u{1F4C5}</span>
+            <div class="rpt-mission-info">
+              <span class="rpt-mission-label">Date</span>
+              <span class="rpt-mission-value">${dateStr}</span>
+            </div>
+          </div>
+          <div class="rpt-mission-divider"></div>
+          <div class="rpt-mission-item">
+            <span class="rpt-mission-icon">\u{1F551}</span>
+            <div class="rpt-mission-info">
+              <span class="rpt-mission-label">Window</span>
+              <span class="rpt-mission-value">${startTime} \u2014 ${endTime}</span>
+            </div>
+          </div>
+          <div class="rpt-mission-divider"></div>
+          <div class="rpt-mission-item">
+            <span class="rpt-mission-icon">\u2601\uFE0F</span>
+            <div class="rpt-mission-info">
+              <span class="rpt-mission-label">Weather</span>
+              <span class="rpt-mission-value">${fd.weatherSummary}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Stats Grid -->
+        <div class="rpt-stats-grid">
+          <div class="rpt-stat-card">
+            <span class="rpt-stat-icon">\u23F1</span>
+            <span class="rpt-stat-value">${fd.durationStr}</span>
+            <span class="rpt-stat-label">Duration</span>
+          </div>
+          <div class="rpt-stat-card">
+            <span class="rpt-stat-icon">\u{1F4CF}</span>
+            <span class="rpt-stat-value">${fd.distanceStr}</span>
+            <span class="rpt-stat-label">Distance</span>
+          </div>
+          <div class="rpt-stat-card">
+            <span class="rpt-stat-icon">\u26A1</span>
+            <span class="rpt-stat-value">${fd.avgSpeed}</span>
+            <span class="rpt-stat-label">Avg Speed (km/h)</span>
+          </div>
+          <div class="rpt-stat-card">
+            <span class="rpt-stat-icon">\u{1F6EB}</span>
+            <span class="rpt-stat-value">${fd.maxAltitude}m</span>
+            <span class="rpt-stat-label">Max Altitude</span>
+          </div>
+          <div class="rpt-stat-card">
+            <span class="rpt-stat-icon">\u{1F50B}</span>
+            <span class="rpt-stat-value">${batteryUsed}%</span>
+            <span class="rpt-stat-label">Battery Used</span>
+            <span class="rpt-stat-sub">${fd.batteryEnd}% remaining</span>
+          </div>
+          <div class="rpt-stat-card">
+            <span class="rpt-stat-icon">\u{1F4CD}</span>
+            <span class="rpt-stat-value">${fd.waypointsVisited}</span>
+            <span class="rpt-stat-label">Waypoints</span>
+            <span class="rpt-stat-sub">All visited</span>
+          </div>
+        </div>
+
+        <!-- Two Column: Performance + Flight Log -->
+        <div class="rpt-two-col">
+          <!-- Performance -->
+          <div class="rpt-section">
+            <div class="rpt-section-header">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="18" height="18"><path d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5"/></svg>
+              <span class="rpt-section-title">Performance</span>
+            </div>
+            <div class="rpt-section-body">
+              <div class="rpt-perf-grid">
+                <div class="rpt-perf-row">
+                  <div class="rpt-perf-label-row">
+                    <span class="rpt-perf-label"><span class="rpt-perf-label-icon">\u26A1</span> Flight Efficiency</span>
+                    <span class="rpt-perf-value">${efficiencyPct}%</span>
+                  </div>
+                  <div class="rpt-perf-bar-track"><div class="rpt-perf-bar-fill green" style="width:${efficiencyPct}%"></div></div>
+                </div>
+                <div class="rpt-perf-row">
+                  <div class="rpt-perf-label-row">
+                    <span class="rpt-perf-label"><span class="rpt-perf-label-icon">\u{1F50B}</span> Battery Efficiency</span>
+                    <span class="rpt-perf-value">${fd.batteryEnd}% left</span>
+                  </div>
+                  <div class="rpt-perf-bar-track"><div class="rpt-perf-bar-fill blue" style="width:${fd.batteryEnd}%"></div></div>
+                </div>
+                <div class="rpt-perf-row">
+                  <div class="rpt-perf-label-row">
+                    <span class="rpt-perf-label"><span class="rpt-perf-label-icon">\u{1F4E1}</span> GPS Accuracy</span>
+                    <span class="rpt-perf-value">${gpsAccuracy}m CEP</span>
+                  </div>
+                  <div class="rpt-perf-bar-track"><div class="rpt-perf-bar-fill purple" style="width:${Math.max(20, 100 - parseFloat(gpsAccuracy) * 30)}%"></div></div>
+                </div>
+                <div class="rpt-perf-row">
+                  <div class="rpt-perf-label-row">
+                    <span class="rpt-perf-label"><span class="rpt-perf-label-icon">\u{1F6E1}\uFE0F</span> Signal Strength</span>
+                    <span class="rpt-perf-value">${fd.satellites} sats</span>
+                  </div>
+                  <div class="rpt-perf-bar-track"><div class="rpt-perf-bar-fill amber" style="width:${Math.min(100, fd.satellites * 7)}%"></div></div>
+                </div>
+                <div class="rpt-perf-row">
+                  <div class="rpt-perf-label-row">
+                    <span class="rpt-perf-label"><span class="rpt-perf-label-icon">\u{1F3AF}</span> Route Adherence</span>
+                    <span class="rpt-perf-value">100%</span>
+                  </div>
+                  <div class="rpt-perf-bar-track"><div class="rpt-perf-bar-fill green" style="width:100%"></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Flight Log -->
+          <div class="rpt-section">
+            <div class="rpt-section-header">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="18" height="18"><path d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/></svg>
+              <span class="rpt-section-title">Flight Log</span>
+              <span class="rpt-section-badge" style="background:rgba(var(--accent-primary-rgb),0.1);color:var(--accent-primary);">${fd.flightLog.length} events</span>
+            </div>
+            <div class="rpt-section-body" style="padding:12px 0;">
+              <table class="rpt-log-table">
+                <thead>
+                  <tr><th>Time</th><th>Event</th><th>Details</th></tr>
+                </thead>
+                <tbody>${logRows}</tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- AI Assessment Section -->
+        <div class="rpt-section rpt-ai-section">
+          <div class="rpt-section-header">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="18" height="18"><path d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/></svg>
+            <span class="rpt-section-title">AI Final Assessment</span>
+            <span class="rpt-section-badge" style="background:rgba(168,85,247,0.1);color:#a855f7;">Gemini</span>
+          </div>
+          <div class="rpt-section-body">
+            <div class="rpt-ai-body" id="rptAiBody">
+              ${this._aiResult ? this._renderAiAssessment(this._aiResult) : `
+              <div class="rpt-ai-empty">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="40" height="40"><path d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/></svg>
+                <p class="rpt-ai-empty-text">Generate a comprehensive AI-powered assessment of this flight, including grading, safety evaluation, and recommendations for future missions.</p>
+              </div>
+              <button class="rpt-ai-generate-btn" id="btnGenerateAssessment">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/></svg>
+                <span class="rpt-ai-btn-text">Generate AI Assessment</span>
+                <div class="rpt-ai-btn-spinner"></div>
+              </button>`}
+            </div>
+          </div>
+        </div>`;
+
+      // Wire generate button
+      const genBtn = d.container.querySelector('#btnGenerateAssessment');
+      if (genBtn) {
+        genBtn.addEventListener('click', () => this._generateAssessment());
+      }
+    },
+
+    async _generateAssessment() {
+      const d = this._getDom();
+      const fd = state.flightData;
+      if (!fd) return;
+
+      const btn = d.container.querySelector('#btnGenerateAssessment');
+      if (btn) btn.classList.add('loading');
+
+      let apiKey = '';
+      try {
+        if (window.helios?.getEnv) apiKey = await window.helios.getEnv('GEMINI_API_KEY');
+      } catch (_) {}
+
+      if (!apiKey) {
+        this._showAssessmentError('Gemini API key not configured. Add GEMINI_API_KEY to .env and restart.');
+        if (btn) btn.classList.remove('loading');
+        return;
+      }
+
+      const prompt = `You are a senior eVTOL drone flight operations officer. Provide a comprehensive post-flight assessment for the following completed mission.
+
+FLIGHT DATA:
+- Drone: ${fd.droneModel} (ID: ${fd.droneId})
+- Mission Date: ${fd.missionStart}
+- Duration: ${fd.durationStr}
+- Total Distance: ${fd.distanceStr}
+- Battery: Started at ${fd.batteryStart}%, ended at ${fd.batteryEnd}% (${fd.batteryStart - fd.batteryEnd}% consumed)
+- Average Speed: ${fd.avgSpeed} km/h, Max Speed: ${fd.maxSpeed} km/h
+- Max Altitude: ${fd.maxAltitude}m
+- Waypoints: ${fd.waypointsVisited} (all visited successfully)
+- GPS Satellites: ${fd.satellites}
+- Weather conditions: ${fd.weatherSummary}
+
+FLIGHT LOG:
+${fd.flightLog.map(l => `- [${l.event.toUpperCase()}] ${l.detail}`).join('\n')}
+
+WAYPOINTS VISITED:
+${fd.waypoints.map((w, i) => `  ${i + 1}. ${w.label} (lat: ${w.lat.toFixed(5)}, lng: ${w.lng.toFixed(5)}, alt: ${w.alt}m)`).join('\n')}
+
+Return JSON only (no markdown, no code fences):
+{
+  "grade": "<A+|A|A-|B+|B|B-|C+|C|D|F>",
+  "gradeTitle": "<e.g. Excellent Performance>",
+  "gradeDescription": "<1 sentence about the grade>",
+  "overallSummary": "<3-4 sentence comprehensive assessment>",
+  "strengths": ["<strength 1>", "<strength 2>", ...],
+  "areasForImprovement": ["<improvement 1>", "<improvement 2>", ...],
+  "safetyEvaluation": {
+    "rating": "<excellent|good|acceptable|concerning|poor>",
+    "notes": ["<note 1>", "<note 2>", ...]
+  },
+  "recommendations": ["<recommendation 1>", "<recommendation 2>", ...],
+  "missionEfficiency": "<percentage string, e.g. 94%>",
+  "riskEvents": <number of risk events detected>,
+  "complianceStatus": "<compliant|minor-issues|non-compliant>"
+}`;
+
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { temperature: 0.4, maxOutputTokens: 2048 }
+          })
+        });
+
+        if (!response.ok) {
+          const errBody = await response.json().catch(() => ({}));
+          throw new Error(errBody?.error?.message || `Gemini API error (${response.status})`);
+        }
+
+        const data = await response.json();
+        const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        const jsonStr = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+        const result = JSON.parse(jsonStr);
+
+        this._aiResult = result;
+        // Re-render AI section
+        const aiBody = d.container.querySelector('#rptAiBody');
+        if (aiBody) {
+          aiBody.innerHTML = this._renderAiAssessment(result);
+        }
+      } catch (err) {
+        if (btn) btn.classList.remove('loading');
+        this._showAssessmentError(err.message);
+      }
+    },
+
+    _renderAiAssessment(data) {
+      const gradeChar = (data.grade || 'B')[0].toUpperCase();
+      const gradeClass = gradeChar === 'A' ? 'grade-a' : gradeChar === 'B' ? 'grade-b' : gradeChar === 'C' ? 'grade-c' : gradeChar === 'D' ? 'grade-d' : 'grade-f';
+
+      const safetyColor = {
+        excellent: '#22c55e', good: '#3b82f6', acceptable: '#eab308', concerning: '#f97316', poor: '#ef4444'
+      }[data.safetyEvaluation?.rating] || '#3b82f6';
+
+      return `
+        <div class="rpt-ai-assessment">
+          <div class="rpt-ai-grade-row">
+            <span class="rpt-ai-grade ${gradeClass}">${data.grade || 'B'}</span>
+            <div class="rpt-ai-grade-info">
+              <span class="rpt-ai-grade-title">${data.gradeTitle || 'Good Performance'}</span>
+              <span class="rpt-ai-grade-desc">${data.gradeDescription || ''}</span>
+            </div>
+          </div>
+
+          <p class="rpt-ai-summary">${data.overallSummary || ''}</p>
+
+          <div style="display:flex;gap:10px;flex-wrap:wrap;">
+            <span class="rpt-header-badge" style="background:rgba(var(--accent-primary-rgb),0.1);border-color:rgba(var(--accent-primary-rgb),0.25);color:var(--accent-primary);">Efficiency: ${data.missionEfficiency || '—'}</span>
+            <span class="rpt-header-badge" style="background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.25);color:#22c55e;">Compliance: ${data.complianceStatus || '—'}</span>
+            <span class="rpt-header-badge" style="background:rgba(${safetyColor === '#22c55e' ? '34,197,94' : safetyColor === '#3b82f6' ? '59,130,246' : '234,179,8'},0.1);border:1px solid rgba(${safetyColor === '#22c55e' ? '34,197,94' : safetyColor === '#3b82f6' ? '59,130,246' : '234,179,8'},0.25);color:${safetyColor};">Safety: ${data.safetyEvaluation?.rating || '—'}</span>
+            <span class="rpt-header-badge" style="background:rgba(168,85,247,0.1);border:1px solid rgba(168,85,247,0.25);color:#a855f7;">Risk Events: ${data.riskEvents ?? 0}</span>
+          </div>
+
+          ${(data.strengths || []).length ? `
+          <div class="rpt-ai-block">
+            <h4 class="rpt-ai-block-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="1.5" width="14" height="14"><path d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+              Strengths
+            </h4>
+            <ul class="rpt-ai-list">${data.strengths.map(s => `<li>${s}</li>`).join('')}</ul>
+          </div>` : ''}
+
+          ${(data.areasForImprovement || []).length ? `
+          <div class="rpt-ai-block">
+            <h4 class="rpt-ai-block-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke="#eab308" stroke-width="1.5" width="14" height="14"><path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
+              Areas for Improvement
+            </h4>
+            <ul class="rpt-ai-list">${data.areasForImprovement.map(a => `<li>${a}</li>`).join('')}</ul>
+          </div>` : ''}
+
+          ${(data.safetyEvaluation?.notes || []).length ? `
+          <div class="rpt-ai-block">
+            <h4 class="rpt-ai-block-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke="${safetyColor}" stroke-width="1.5" width="14" height="14"><path d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/></svg>
+              Safety Evaluation — ${(data.safetyEvaluation.rating || '').charAt(0).toUpperCase() + (data.safetyEvaluation.rating || '').slice(1)}
+            </h4>
+            <ul class="rpt-ai-list">${data.safetyEvaluation.notes.map(n => `<li>${n}</li>`).join('')}</ul>
+          </div>` : ''}
+
+          ${(data.recommendations || []).length ? `
+          <div class="rpt-ai-block">
+            <h4 class="rpt-ai-block-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="1.5" width="14" height="14"><path d="M12 18v-5.25m0 0a6.01 6.01 0 001.5-.189m-1.5.189a6.01 6.01 0 01-1.5-.189m3.75 7.478a12.06 12.06 0 01-4.5 0m3.75 2.383a14.406 14.406 0 01-3 0M14.25 18v-.192c0-.983.658-1.823 1.508-2.316a7.5 7.5 0 10-7.517 0c.85.493 1.509 1.333 1.509 2.316V18"/></svg>
+              Recommendations
+            </h4>
+            <ul class="rpt-ai-list">${data.recommendations.map(r => `<li>${r}</li>`).join('')}</ul>
+          </div>` : ''}
+        </div>`;
+    },
+
+    _showAssessmentError(message) {
+      const d = this._getDom();
+      const aiBody = d.container.querySelector('#rptAiBody');
+      if (!aiBody) return;
+      const errEl = document.createElement('div');
+      errEl.style.cssText = 'padding:12px 16px;border-radius:12px;border:1px solid rgba(239,68,68,0.3);background:rgba(239,68,68,0.06);color:#ef4444;font-size:13px;margin-top:8px;';
+      errEl.textContent = message;
+      aiBody.appendChild(errEl);
+    }
+  };
+
   // ── Event Listeners ──
   function bindEvents() {
     dom.themeToggle.addEventListener('click', () => Theme.toggle());
@@ -1928,6 +2444,7 @@ RULES:
     Dashboard.init();
     Missions.init();
     DroneView.init();
+    Reports.init();
     bindEvents();
 
     document.body.classList.add('app-loaded');

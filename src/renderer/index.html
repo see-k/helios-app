@@ -15,6 +15,7 @@
   <link rel="stylesheet" href="css/dashboard.css">
   <link rel="stylesheet" href="css/missions.css">
   <link rel="stylesheet" href="css/droneview.css">
+  <link rel="stylesheet" href="css/reports.css">
   <link rel="stylesheet" href="css/animations.css">
 </head>
 <body>
@@ -342,6 +343,14 @@
         <div class="droneview-map-wrapper">
           <div id="droneviewMap" class="droneview-map"></div>
 
+          <!-- Demo Data Badge -->
+          <div class="dv-demo-badge">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
+              <path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/>
+            </svg>
+            <span>Simulated Data</span>
+          </div>
+
           <!-- Live Badge -->
           <div class="dv-live-badge">
             <span class="dv-live-dot"></span>
@@ -375,6 +384,47 @@
               <path d="M9 5l7 7-7 7"/>
             </svg>
           </button>
+
+          <!-- Mission Complete Overlay -->
+          <div class="dv-mission-complete-overlay" id="dvMissionComplete">
+            <div class="dv-mission-complete-card">
+              <div class="dv-mc-check">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="32" height="32">
+                  <path d="M4.5 12.75l6 6 9-13.5"/>
+                </svg>
+              </div>
+              <h2 class="dv-mc-title">Mission Complete</h2>
+              <p class="dv-mc-subtitle">The drone has successfully returned to the launch point. All waypoints were visited.</p>
+              <div class="dv-mc-stats">
+                <div class="dv-mc-stat">
+                  <span class="dv-mc-stat-value" id="dvMcDuration">--</span>
+                  <span class="dv-mc-stat-label">Duration</span>
+                </div>
+                <div class="dv-mc-stat">
+                  <span class="dv-mc-stat-value" id="dvMcDistance">--</span>
+                  <span class="dv-mc-stat-label">Distance</span>
+                </div>
+                <div class="dv-mc-stat">
+                  <span class="dv-mc-stat-value" id="dvMcBattery">--</span>
+                  <span class="dv-mc-stat-label">Battery Left</span>
+                </div>
+              </div>
+              <div class="dv-mc-actions">
+                <button class="dv-mc-btn dv-mc-btn-secondary" id="btnRestartMission">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                    <path d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182"/>
+                  </svg>
+                  Restart
+                </button>
+                <button class="dv-mc-btn dv-mc-btn-primary" id="btnViewReport">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                    <path d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/>
+                  </svg>
+                  View Flight Report
+                </button>
+              </div>
+            </div>
+          </div>
 
           <!-- AI Route Control Bar -->
           <div class="dv-ai-route-bar" id="dvRouteBar">
@@ -537,6 +587,13 @@
             </div>
           </div>
         </div>
+      </div>
+    </section>
+
+    <!-- Reports Page -->
+    <section class="page-section" id="pageReports" style="display:none;">
+      <div class="reports-container" id="reportsContent">
+        <!-- Content dynamically rendered by Reports module -->
       </div>
     </section>
 
