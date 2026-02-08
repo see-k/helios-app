@@ -20,7 +20,8 @@
     modelBackground: document.getElementById('modelBackground'),
     // Pages
     mainContent: document.getElementById('mainContent'),
-    pageMissions: document.getElementById('pageMissions')
+    pageMissions: document.getElementById('pageMissions'),
+    pageDroneView: document.getElementById('pageDroneView')
   };
 
   // ── Page registry ──
@@ -36,6 +37,12 @@
       showModel: false,
       onEnter: () => Missions.onEnter(),
       onLeave: () => Missions.onLeave()
+    },
+    droneview: {
+      el: () => dom.pageDroneView,
+      showModel: false,
+      onEnter: () => DroneView.onEnter(),
+      onLeave: () => DroneView.onLeave()
     }
   };
 
@@ -1093,6 +1100,809 @@ RULES:
     }
   };
 
+  // ════════════════════════════════════════════
+  //  DRONE VIEW - Live Tracking & AI Analysis
+  // ════════════════════════════════════════════
+  const DroneView = {
+    _map: null,
+    _mapsReady: false,
+    _droneMarker: null,
+    _routePolyline: null,
+    _trailPolyline: null,
+    _waypointMarkers: [],
+    _altRoutePolylines: [],
+    _altRouteMarkers: [],
+    _simInterval: null,
+    _weatherInterval: null,
+    _simIndex: 0,
+    _simFraction: 0,
+    _dom: null,
+
+    // Simulated mission waypoints (San Francisco area)
+    _missionWaypoints: [
+      { lat: 37.7749, lng: -122.4194, label: 'Take Off', type: 'takeoff', alt: 0 },
+      { lat: 37.7820, lng: -122.4060, label: 'WP 1 — Financial District', type: 'waypoint', alt: 85 },
+      { lat: 37.7900, lng: -122.3950, label: 'WP 2 — Embarcadero', type: 'waypoint', alt: 110 },
+      { lat: 37.8025, lng: -122.4058, label: 'WP 3 — Fisherman\'s Wharf', type: 'waypoint', alt: 95 },
+      { lat: 37.8080, lng: -122.4177, label: 'WP 4 — Ghirardelli Square', type: 'waypoint', alt: 75 },
+      { lat: 37.7990, lng: -122.4310, label: 'WP 5 — Marina', type: 'waypoint', alt: 60 },
+      { lat: 37.7749, lng: -122.4194, label: 'Return to Launch', type: 'rtl', alt: 0 }
+    ],
+
+    // Simulated live telemetry
+    _telemetry: {
+      altitude: 0,
+      speed: 0,
+      heading: 0,
+      battery: 100,
+      satellites: 14,
+      lat: 37.7749,
+      lng: -122.4194
+    },
+
+    _getDom() {
+      if (this._dom) return this._dom;
+      this._dom = {
+        mapEl: document.getElementById('droneviewMap'),
+        // Telemetry
+        altitude: document.getElementById('dvAltitude'),
+        speed: document.getElementById('dvSpeed'),
+        heading: document.getElementById('dvHeading'),
+        satellites: document.getElementById('dvSatellites'),
+        battery: document.getElementById('dvBattery'),
+        batteryFill: document.getElementById('dvBatteryFill'),
+        lat: document.getElementById('dvLat'),
+        lng: document.getElementById('dvLng'),
+        // Progress
+        progressPct: document.getElementById('dvProgressPct'),
+        progressFill: document.getElementById('dvProgressFill'),
+        // Weather
+        weatherIcon: document.getElementById('dvWeatherIcon'),
+        weatherCondition: document.getElementById('dvWeatherCondition'),
+        weatherTemp: document.getElementById('dvWeatherTemp'),
+        weatherWind: document.getElementById('dvWeatherWind'),
+        weatherWindDir: document.getElementById('dvWeatherWindDir'),
+        weatherRain: document.getElementById('dvWeatherRain'),
+        weatherVis: document.getElementById('dvWeatherVis'),
+        // Waypoints
+        waypointList: document.getElementById('dvWaypointList'),
+        // AI panels
+        loadingOverlay: document.getElementById('dvLoadingOverlay'),
+        analysisPanel: document.getElementById('dvAnalysisPanel'),
+        analysisBody: document.getElementById('dvAnalysisBody'),
+        btnCloseAnalysis: document.getElementById('btnCloseAnalysis'),
+        routeBar: document.getElementById('dvRouteBar'),
+        btnDismissRoutes: document.getElementById('btnDismissRoutes'),
+        btnAcceptRoute: document.getElementById('btnAcceptRoute'),
+        // AI buttons
+        btnFlightAnalysis: document.getElementById('btnFlightAnalysis'),
+        btnAltRoutes: document.getElementById('btnAltRoutes'),
+        // Collapse / Expand
+        telemetryPanel: document.getElementById('dvTelemetryPanel'),
+        btnCollapse: document.getElementById('btnCollapseTelemetry'),
+        btnExpand: document.getElementById('btnExpandTelemetry')
+      };
+      return this._dom;
+    },
+
+    init() {
+      const d = this._getDom();
+      d.btnFlightAnalysis.addEventListener('click', () => this._requestFlightAnalysis());
+      d.btnAltRoutes.addEventListener('click', () => this._requestAltRoutes());
+      d.btnCloseAnalysis.addEventListener('click', () => d.analysisPanel.classList.remove('visible'));
+      d.btnDismissRoutes.addEventListener('click', () => this._dismissAltRoutes());
+      d.btnAcceptRoute.addEventListener('click', () => this._acceptAltRoute());
+      // Panel collapse/expand
+      d.btnCollapse.addEventListener('click', () => this._togglePanel(false));
+      d.btnExpand.addEventListener('click', () => this._togglePanel(true));
+    },
+
+    _togglePanel(show) {
+      const d = this._getDom();
+      if (show) {
+        d.telemetryPanel.classList.remove('collapsed');
+        d.btnExpand.classList.remove('visible');
+      } else {
+        d.telemetryPanel.classList.add('collapsed');
+        d.btnExpand.classList.add('visible');
+      }
+      // Reclaim map space
+      if (this._map) {
+        setTimeout(() => google.maps.event.trigger(this._map, 'resize'), 360);
+      }
+    },
+
+    onEnter() {
+      if (!this._mapsReady) {
+        this._waitForMaps();
+      } else if (this._map) {
+        google.maps.event.trigger(this._map, 'resize');
+        this._startSimulation();
+      }
+    },
+
+    onLeave() {
+      this._stopSimulation();
+    },
+
+    // Wait for Google Maps to be available (shared with Missions)
+    _waitForMaps() {
+      if (typeof google !== 'undefined' && google.maps) {
+        this._mapsReady = true;
+        this._initMap();
+        return;
+      }
+      // If maps not loaded yet, poll
+      const poll = setInterval(() => {
+        if (typeof google !== 'undefined' && google.maps) {
+          clearInterval(poll);
+          this._mapsReady = true;
+          this._initMap();
+        }
+      }, 300);
+      // Also try triggering mission page to load maps
+      if (!Missions._mapsLoaded) {
+        Missions._loadGoogleMaps().then(() => {
+          // Maps loaded by mission, we can now init
+          if (typeof google !== 'undefined' && google.maps && !this._mapsReady) {
+            clearInterval(poll);
+            this._mapsReady = true;
+            this._initMap();
+          }
+        });
+      }
+    },
+
+    _initMap() {
+      const d = this._getDom();
+      this._map = new google.maps.Map(d.mapEl, {
+        center: { lat: 37.7900, lng: -122.4100 },
+        zoom: 14,
+        styles: this._getMapStyles(),
+        disableDefaultUI: true,
+        zoomControl: true,
+        zoomControlOptions: { position: google.maps.ControlPosition.LEFT_BOTTOM },
+        mapTypeControl: false,
+        streetViewControl: false,
+        fullscreenControl: false,
+        gestureHandling: 'greedy',
+        clickableIcons: false
+      });
+
+      // Route polyline (planned route)
+      this._routePolyline = new google.maps.Polyline({
+        map: this._map,
+        path: this._missionWaypoints.map(w => ({ lat: w.lat, lng: w.lng })),
+        strokeColor: '#3b82f6',
+        strokeOpacity: 0.4,
+        strokeWeight: 3,
+        geodesic: true
+      });
+
+      // Trail polyline (where drone has been)
+      this._trailPolyline = new google.maps.Polyline({
+        map: this._map,
+        path: [],
+        strokeColor: '#22c55e',
+        strokeOpacity: 0.8,
+        strokeWeight: 3,
+        geodesic: true
+      });
+
+      // Waypoint markers
+      this._missionWaypoints.forEach((wp, i) => {
+        const len = this._missionWaypoints.length;
+        let type = wp.type;
+        let label = type === 'takeoff' ? 'T' : type === 'rtl' ? 'R' : String(i);
+        const marker = new google.maps.Marker({
+          position: { lat: wp.lat, lng: wp.lng },
+          map: this._map,
+          icon: {
+            url: Missions._createMarkerIcon(label, type),
+            scaledSize: new google.maps.Size(28, 37),
+            anchor: new google.maps.Point(14, 37)
+          },
+          title: wp.label,
+          zIndex: 50 + i
+        });
+        this._waypointMarkers.push(marker);
+      });
+
+      // Drone marker
+      this._droneMarker = new google.maps.Marker({
+        position: { lat: this._missionWaypoints[0].lat, lng: this._missionWaypoints[0].lng },
+        map: this._map,
+        icon: {
+          url: this._createDroneIcon(),
+          scaledSize: new google.maps.Size(40, 40),
+          anchor: new google.maps.Point(20, 20)
+        },
+        title: 'Helios X1 — HLX-0042',
+        zIndex: 1000
+      });
+
+      this._renderWaypointList();
+      this._startSimulation();
+      this._fetchLiveWeather();
+    },
+
+    _getMapStyles() {
+      // Reuse Missions' map styles
+      return Missions._getMapStyles();
+    },
+
+    _createDroneIcon() {
+      const svg = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">
+          <defs>
+            <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+              <feDropShadow dx="0" dy="0" stdDeviation="3" flood-color="rgba(34,197,94,0.6)"/>
+            </filter>
+          </defs>
+          <circle cx="20" cy="20" r="14" fill="#0a0a0f" stroke="#22c55e" stroke-width="2.5" filter="url(#glow)"/>
+          <circle cx="20" cy="20" r="8" fill="#22c55e" fill-opacity="0.2"/>
+          <polygon points="20,10 24,22 20,19 16,22" fill="#22c55e"/>
+          <circle cx="20" cy="20" r="3" fill="#22c55e"/>
+        </svg>`;
+      return 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg);
+    },
+
+    // ── Simulation Engine ──
+    _startSimulation() {
+      if (this._simInterval) return;
+
+      // Reset
+      this._simIndex = 0;
+      this._simFraction = 0;
+      this._telemetry.battery = 100;
+      if (this._trailPolyline) this._trailPolyline.setPath([]);
+
+      const stepsPerSegment = 600; // smooth, realistic movement
+      const intervalMs = 100; // 10fps
+
+      this._simInterval = setInterval(() => {
+        const wps = this._missionWaypoints;
+        if (this._simIndex >= wps.length - 1) {
+          // Mission complete — loop
+          this._simIndex = 0;
+          this._simFraction = 0;
+          this._telemetry.battery = 100;
+          if (this._trailPolyline) this._trailPolyline.setPath([]);
+          return;
+        }
+
+        this._simFraction += 1 / stepsPerSegment;
+        if (this._simFraction >= 1) {
+          this._simFraction = 0;
+          this._simIndex++;
+          if (this._simIndex >= wps.length - 1) return;
+        }
+
+        const from = wps[this._simIndex];
+        const to = wps[this._simIndex + 1];
+        const t = this._simFraction;
+
+        // Interpolate position
+        const lat = from.lat + (to.lat - from.lat) * t;
+        const lng = from.lng + (to.lng - from.lng) * t;
+        const alt = from.alt + (to.alt - from.alt) * t;
+
+        // Heading
+        const heading = this._bearing(from.lat, from.lng, to.lat, to.lng);
+
+        // Speed with minor variation
+        const baseSpeed = 42 + Math.sin(Date.now() / 2000) * 8;
+
+        // Battery drain
+        const totalSteps = (wps.length - 1) * stepsPerSegment;
+        const currentStep = this._simIndex * stepsPerSegment + this._simFraction * stepsPerSegment;
+        const battery = Math.max(8, 100 - (currentStep / totalSteps) * 85);
+
+        // Satellites variation
+        const sats = 12 + Math.round(Math.sin(Date.now() / 5000) * 3);
+
+        // Update telemetry state
+        this._telemetry = { altitude: Math.round(alt), speed: baseSpeed.toFixed(1), heading: Math.round(heading), battery: Math.round(battery), satellites: sats, lat, lng };
+
+        // Update map
+        const pos = { lat, lng };
+        if (this._droneMarker) {
+          this._droneMarker.setPosition(pos);
+        }
+        // Extend trail
+        if (this._trailPolyline) {
+          const path = this._trailPolyline.getPath();
+          path.push(new google.maps.LatLng(lat, lng));
+        }
+
+        // Pan map to follow drone (every nth frame to avoid jitter)
+        if (Math.round(this._simFraction * stepsPerSegment) % 20 === 0 && this._map) {
+          this._map.panTo(pos);
+        }
+
+        // Update UI
+        this._updateTelemetryUI();
+        this._updateProgress();
+        this._updateWaypointStatuses();
+      }, intervalMs);
+    },
+
+    _stopSimulation() {
+      if (this._simInterval) {
+        clearInterval(this._simInterval);
+        this._simInterval = null;
+      }
+      if (this._weatherInterval) {
+        clearInterval(this._weatherInterval);
+        this._weatherInterval = null;
+      }
+    },
+
+    _bearing(lat1, lng1, lat2, lng2) {
+      const toRad = d => d * Math.PI / 180;
+      const toDeg = r => r * 180 / Math.PI;
+      const dLng = toRad(lng2 - lng1);
+      const y = Math.sin(dLng) * Math.cos(toRad(lat2));
+      const x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) - Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(dLng);
+      return (toDeg(Math.atan2(y, x)) + 360) % 360;
+    },
+
+    // ── Telemetry UI Update ──
+    _updateTelemetryUI() {
+      const d = this._getDom();
+      const t = this._telemetry;
+      d.altitude.textContent = t.altitude;
+      d.speed.textContent = t.speed;
+      d.heading.textContent = Math.round(t.heading) + '°';
+      d.satellites.textContent = t.satellites;
+      d.battery.textContent = Math.round(t.battery) + '%';
+      d.lat.textContent = t.lat.toFixed(5);
+      d.lng.textContent = t.lng.toFixed(5);
+
+      // Battery bar
+      const bPct = Math.round(t.battery);
+      d.batteryFill.style.width = bPct + '%';
+      d.batteryFill.className = 'dv-battery-fill ' + (bPct > 50 ? 'high' : bPct > 20 ? 'medium' : 'low');
+    },
+
+    _updateProgress() {
+      const d = this._getDom();
+      const wps = this._missionWaypoints;
+      const totalSegments = wps.length - 1;
+      const pct = Math.min(100, ((this._simIndex + this._simFraction) / totalSegments) * 100);
+      d.progressPct.textContent = Math.round(pct) + '%';
+      d.progressFill.style.width = pct + '%';
+    },
+
+    // ── Waypoint List ──
+    _renderWaypointList() {
+      const d = this._getDom();
+      d.waypointList.innerHTML = this._missionWaypoints.map((wp, i) => {
+        const mkrChar = wp.type === 'takeoff' ? 'T' : wp.type === 'rtl' ? 'R' : String(i);
+        return `
+          <div class="dv-wp-item" data-index="${i}">
+            <div class="dv-wp-marker type-${wp.type}">${mkrChar}</div>
+            <div class="dv-wp-info">
+              <div class="dv-wp-name">${wp.label}</div>
+              <div class="dv-wp-eta">Alt: ${wp.alt}m</div>
+            </div>
+            <span class="dv-wp-status pending" id="dvWpStatus${i}">Pending</span>
+          </div>`;
+      }).join('');
+    },
+
+    _updateWaypointStatuses() {
+      const wps = this._missionWaypoints;
+      wps.forEach((wp, i) => {
+        const el = document.getElementById(`dvWpStatus${i}`);
+        if (!el) return;
+        if (i < this._simIndex) {
+          el.textContent = 'Reached';
+          el.className = 'dv-wp-status reached';
+          el.closest('.dv-wp-item').classList.add('completed');
+          el.closest('.dv-wp-item').classList.remove('active');
+        } else if (i === this._simIndex) {
+          el.textContent = 'Active';
+          el.className = 'dv-wp-status next';
+          el.closest('.dv-wp-item').classList.remove('completed');
+          el.closest('.dv-wp-item').classList.add('active');
+        } else {
+          el.textContent = 'Pending';
+          el.className = 'dv-wp-status pending';
+          el.closest('.dv-wp-item').classList.remove('completed', 'active');
+        }
+      });
+    },
+
+    // ── Live Weather ──
+    async _fetchLiveWeather() {
+      try {
+        const wp = this._missionWaypoints[0];
+        const today = new Date().toISOString().split('T')[0];
+        const url = `https://api.open-meteo.com/v1/forecast?latitude=${wp.lat}&longitude=${wp.lng}`
+          + `&hourly=temperature_2m,windspeed_10m,winddirection_10m,precipitation_probability,visibility,weathercode`
+          + `&start_date=${today}&end_date=${today}&timezone=auto`;
+
+        const response = await fetch(url);
+        if (!response.ok) return;
+        const data = await response.json();
+        if (!data.hourly) return;
+
+        // Current hour
+        const hour = new Date().getHours();
+        const idx = Math.min(hour, (data.hourly.time?.length || 1) - 1);
+
+        const weatherCode = data.hourly.weathercode?.[idx];
+        const info = Missions._weatherCodeToInfo(weatherCode);
+        const compass = Missions._windDirToCompass(data.hourly.winddirection_10m?.[idx] || 0);
+        const visKm = data.hourly.visibility?.[idx] != null ? (data.hourly.visibility[idx] / 1000).toFixed(1) : '—';
+
+        const d = this._getDom();
+        d.weatherIcon.textContent = info.icon;
+        d.weatherCondition.textContent = info.label;
+        d.weatherTemp.textContent = data.hourly.temperature_2m?.[idx] != null ? data.hourly.temperature_2m[idx] + '°C' : '—';
+        d.weatherWind.textContent = data.hourly.windspeed_10m?.[idx] != null ? data.hourly.windspeed_10m[idx] + ' km/h' : '—';
+        d.weatherWindDir.textContent = 'Wind ' + compass;
+        d.weatherRain.textContent = data.hourly.precipitation_probability?.[idx] != null ? data.hourly.precipitation_probability[idx] + '%' : '—';
+        d.weatherVis.textContent = visKm + ' km';
+      } catch (e) {
+        console.warn('Weather fetch failed:', e);
+      }
+
+      // Refresh every 5 minutes
+      if (!this._weatherInterval) {
+        this._weatherInterval = setInterval(() => this._fetchLiveWeather(), 300000);
+      }
+    },
+
+    // ═══════════════════════════════════════════
+    //  AI: FLIGHT ANALYSIS (Gemini)
+    // ═══════════════════════════════════════════
+
+    async _requestFlightAnalysis() {
+      const d = this._getDom();
+      let apiKey = '';
+      try {
+        if (window.helios?.getEnv) apiKey = await window.helios.getEnv('GEMINI_API_KEY');
+      } catch (_) {}
+      if (!apiKey) {
+        this._showError('Gemini API key not configured. Add GEMINI_API_KEY to .env and restart.');
+        return;
+      }
+
+      d.btnFlightAnalysis.classList.add('loading');
+      d.loadingOverlay.classList.add('visible');
+
+      try {
+        const t = this._telemetry;
+        const wps = this._missionWaypoints;
+        const completedPct = Math.round(((this._simIndex + this._simFraction) / (wps.length - 1)) * 100);
+
+        const prompt = `You are an expert eVTOL drone flight analyst. Analyze this LIVE in-progress flight and provide a real-time assessment.
+
+LIVE TELEMETRY:
+- Drone: Helios X1 Recon (HLX-0042)
+- Current Position: lat ${t.lat.toFixed(6)}, lng ${t.lng.toFixed(6)}
+- Altitude: ${t.altitude}m
+- Ground Speed: ${t.speed} km/h
+- Heading: ${t.heading}°
+- Battery: ${Math.round(t.battery)}%
+- GPS Satellites: ${t.satellites}
+- Mission Progress: ${completedPct}%
+- Current Waypoint Index: ${this._simIndex + 1} of ${wps.length}
+
+FLIGHT PLAN:
+${wps.map((wp, i) => `  ${i + 1}. [${wp.type}] ${wp.label} — lat: ${wp.lat.toFixed(6)}, lng: ${wp.lng.toFixed(6)}, alt: ${wp.alt}m`).join('\n')}
+
+Provide a JSON response with EXACTLY this structure (no markdown, no code fences, raw JSON only):
+{
+  "flightStatus": "<nominal|caution|warning|critical>",
+  "summary": "<2-3 sentence real-time assessment>",
+  "performance": {
+    "efficiency": "<percentage as string, e.g. 92%>",
+    "estimatedTimeRemaining": "<e.g. 8 min>",
+    "estimatedBatteryAtLanding": "<e.g. 22%>",
+    "distanceRemaining": "<e.g. 3.2 km>"
+  },
+  "observations": ["<observation 1>", "<observation 2>", ...],
+  "recommendations": ["<recommendation 1>", "<recommendation 2>", ...],
+  "alerts": ["<any urgent alerts, or empty array>"]
+}`;
+
+        const result = await this._callGemini(apiKey, prompt);
+        d.loadingOverlay.classList.remove('visible');
+        d.btnFlightAnalysis.classList.remove('loading');
+        this._showAnalysisPanel(result);
+      } catch (err) {
+        d.loadingOverlay.classList.remove('visible');
+        d.btnFlightAnalysis.classList.remove('loading');
+        this._showError(err.message);
+      }
+    },
+
+    _showAnalysisPanel(data) {
+      const d = this._getDom();
+
+      const statusColors = { nominal: '#22c55e', caution: '#eab308', warning: '#f97316', critical: '#ef4444' };
+      const statusColor = statusColors[data.flightStatus] || statusColors.nominal;
+
+      const alertsHtml = (data.alerts || []).length > 0
+        ? `<div style="padding:8px 12px;border-radius:10px;border:1px solid rgba(239,68,68,0.3);background:rgba(239,68,68,0.06);margin-bottom:4px;">
+            <h3><svg viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="1.5" width="13" height="13"><path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg> Alerts</h3>
+            <ul>${data.alerts.map(a => `<li>${a}</li>`).join('')}</ul>
+          </div>`
+        : '';
+
+      d.analysisBody.innerHTML = `
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:2px;">
+          <span style="width:10px;height:10px;border-radius:50%;background:${statusColor};box-shadow:0 0 8px ${statusColor}80;flex-shrink:0;"></span>
+          <span style="font-size:12px;font-weight:700;color:${statusColor};text-transform:uppercase;letter-spacing:0.5px;">${data.flightStatus || 'Nominal'}</span>
+        </div>
+
+        <p style="font-size:13px;line-height:1.6;color:var(--text-primary);">${data.summary || ''}</p>
+
+        ${alertsHtml}
+
+        <div class="dv-analysis-stat-row">
+          <div class="dv-analysis-stat">
+            <span class="dv-analysis-stat-value">${data.performance?.efficiency || '—'}</span>
+            <span class="dv-analysis-stat-label">Efficiency</span>
+          </div>
+          <div class="dv-analysis-stat">
+            <span class="dv-analysis-stat-value">${data.performance?.estimatedTimeRemaining || '—'}</span>
+            <span class="dv-analysis-stat-label">Time Left</span>
+          </div>
+          <div class="dv-analysis-stat">
+            <span class="dv-analysis-stat-value">${data.performance?.estimatedBatteryAtLanding || '—'}</span>
+            <span class="dv-analysis-stat-label">Batt @ Land</span>
+          </div>
+        </div>
+
+        ${(data.observations || []).length ? `
+        <div>
+          <h3><svg viewBox="0 0 24 24" fill="none" stroke="var(--accent-primary)" stroke-width="1.5" width="13" height="13"><path d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"/><path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg> Observations</h3>
+          <ul>${data.observations.map(o => `<li>${o}</li>`).join('')}</ul>
+        </div>` : ''}
+
+        ${(data.recommendations || []).length ? `
+        <div>
+          <h3><svg viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="1.5" width="13" height="13"><path d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg> Recommendations</h3>
+          <ul>${data.recommendations.map(r => `<li>${r}</li>`).join('')}</ul>
+        </div>` : ''}`;
+
+      d.analysisPanel.classList.add('visible');
+    },
+
+    // ═══════════════════════════════════════════
+    //  AI: ALTERNATIVE ROUTES (Gemini)
+    // ═══════════════════════════════════════════
+
+    async _requestAltRoutes() {
+      const d = this._getDom();
+      let apiKey = '';
+      try {
+        if (window.helios?.getEnv) apiKey = await window.helios.getEnv('GEMINI_API_KEY');
+      } catch (_) {}
+      if (!apiKey) {
+        this._showError('Gemini API key not configured. Add GEMINI_API_KEY to .env and restart.');
+        return;
+      }
+
+      d.btnAltRoutes.classList.add('loading');
+      d.loadingOverlay.classList.add('visible');
+
+      try {
+        const t = this._telemetry;
+        const wps = this._missionWaypoints;
+        const remainingWps = wps.slice(this._simIndex);
+
+        const prompt = `You are an expert eVTOL drone route optimizer. The drone is currently in-flight and needs alternative route suggestions for the REMAINING portion of its mission.
+
+CURRENT POSITION:
+- lat: ${t.lat.toFixed(6)}, lng: ${t.lng.toFixed(6)}, altitude: ${t.altitude}m
+- Battery: ${Math.round(t.battery)}%, Speed: ${t.speed} km/h
+- Heading: ${t.heading}°
+
+REMAINING WAYPOINTS:
+${remainingWps.map((wp, i) => `  ${i + 1}. [${wp.type}] ${wp.label} — lat: ${wp.lat.toFixed(6)}, lng: ${wp.lng.toFixed(6)}, alt: ${wp.alt}m`).join('\n')}
+
+DESTINATION (must be reached): lat ${wps[wps.length - 1].lat.toFixed(6)}, lng ${wps[wps.length - 1].lng.toFixed(6)}
+
+Suggest 2 alternative routes. Return JSON only (no markdown, no code fences):
+{
+  "alternatives": [
+    {
+      "name": "<route name, e.g. 'Wind-Optimized Route'>",
+      "description": "<1 sentence description>",
+      "estimatedTimeSaved": "<e.g. 2 min>",
+      "estimatedBatterySaved": "<e.g. 5%>",
+      "waypoints": [
+        { "lat": <number>, "lng": <number>, "alt": <number>, "label": "<label>", "type": "<waypoint|rtl>" }
+      ]
+    }
+  ]
+}
+
+RULES:
+- Each route MUST start near the drone's current position
+- Each route MUST end at the destination coordinates
+- Keep waypoints within 5km of the original route corridor (San Francisco area)
+- Recommend practical alternatives (shorter, wind-optimized, safer altitude, etc.)
+- 3-5 waypoints per alternative route
+- Altitudes between 30-120m`;
+
+        const result = await this._callGemini(apiKey, prompt);
+        d.loadingOverlay.classList.remove('visible');
+        d.btnAltRoutes.classList.remove('loading');
+        if (result.alternatives && result.alternatives.length > 0) {
+          this._lastAltRoutes = result.alternatives;
+          this._showAltRoutes(result.alternatives);
+        } else {
+          this._showError('No alternative routes returned. Try again.');
+        }
+      } catch (err) {
+        d.loadingOverlay.classList.remove('visible');
+        d.btnAltRoutes.classList.remove('loading');
+        this._showError(err.message);
+      }
+    },
+
+    _showAltRoutes(alternatives) {
+      this._clearAltRoutes();
+      const d = this._getDom();
+      const colors = ['#a855f7', '#ec4899'];
+
+      alternatives.forEach((route, rIdx) => {
+        const color = colors[rIdx % colors.length];
+        if (!route.waypoints || !route.waypoints.length) return;
+
+        // Polyline
+        const path = route.waypoints.map(wp => ({ lat: wp.lat, lng: wp.lng }));
+        const polyline = new google.maps.Polyline({
+          map: this._map,
+          path: path,
+          strokeColor: color,
+          strokeOpacity: 0,
+          strokeWeight: 3,
+          geodesic: true,
+          icons: [{
+            icon: {
+              path: 'M 0,-1 0,1',
+              strokeOpacity: 0.8,
+              strokeColor: color,
+              scale: 3
+            },
+            offset: '0',
+            repeat: '16px'
+          }]
+        });
+        this._altRoutePolylines.push(polyline);
+
+        // Markers
+        route.waypoints.forEach((wp, wIdx) => {
+          const isLast = wIdx === route.waypoints.length - 1;
+          const label = isLast ? 'R' : String(wIdx + 1);
+          const type = isLast ? 'rtl' : 'waypoint';
+          const marker = new google.maps.Marker({
+            position: { lat: wp.lat, lng: wp.lng },
+            map: this._map,
+            icon: {
+              url: Missions._createAiMarkerIcon(label, type),
+              scaledSize: new google.maps.Size(28, 28),
+              anchor: new google.maps.Point(14, 26)
+            },
+            title: `${route.name}: ${wp.label}` + (wp.alt ? ` (${wp.alt}m)` : ''),
+            zIndex: 200 + rIdx * 10 + wIdx
+          });
+          this._altRouteMarkers.push(marker);
+        });
+      });
+
+      d.routeBar.classList.add('visible');
+    },
+
+    _clearAltRoutes() {
+      this._altRoutePolylines.forEach(p => p.setMap(null));
+      this._altRoutePolylines = [];
+      this._altRouteMarkers.forEach(m => m.setMap(null));
+      this._altRouteMarkers = [];
+    },
+
+    _dismissAltRoutes() {
+      this._clearAltRoutes();
+      this._getDom().routeBar.classList.remove('visible');
+      this._lastAltRoutes = null;
+    },
+
+    _acceptAltRoute() {
+      // Accept the first alternative route — update mission waypoints
+      if (this._lastAltRoutes && this._lastAltRoutes[0]) {
+        const alt = this._lastAltRoutes[0];
+        // Rebuild remaining mission from current position
+        const current = { lat: this._telemetry.lat, lng: this._telemetry.lng, label: 'Current Position', type: 'waypoint', alt: this._telemetry.altitude };
+        const newWps = [current, ...alt.waypoints];
+
+        // Replace remaining portion of mission
+        const completed = this._missionWaypoints.slice(0, this._simIndex + 1);
+        this._missionWaypoints.length = 0;
+        this._missionWaypoints.push(...completed, ...newWps);
+
+        // Rebuild route polyline
+        if (this._routePolyline) {
+          this._routePolyline.setPath(this._missionWaypoints.map(w => ({ lat: w.lat, lng: w.lng })));
+        }
+        // Rebuild waypoint markers
+        this._waypointMarkers.forEach(m => m.setMap(null));
+        this._waypointMarkers = [];
+        this._missionWaypoints.forEach((wp, i) => {
+          const len = this._missionWaypoints.length;
+          let type = wp.type;
+          let label = type === 'takeoff' ? 'T' : type === 'rtl' ? 'R' : String(i);
+          const marker = new google.maps.Marker({
+            position: { lat: wp.lat, lng: wp.lng },
+            map: this._map,
+            icon: {
+              url: Missions._createMarkerIcon(label, type),
+              scaledSize: new google.maps.Size(28, 37),
+              anchor: new google.maps.Point(14, 37)
+            },
+            title: wp.label,
+            zIndex: 50 + i
+          });
+          this._waypointMarkers.push(marker);
+        });
+        this._renderWaypointList();
+      }
+      this._dismissAltRoutes();
+    },
+
+    // ═══════════════════════════════════════════
+    //  GEMINI API CALL (shared)
+    // ═══════════════════════════════════════════
+
+    async _callGemini(apiKey, prompt) {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.4, maxOutputTokens: 2048 }
+        })
+      });
+      if (!response.ok) {
+        const errBody = await response.json().catch(() => ({}));
+        throw new Error(errBody?.error?.message || `Gemini API error (${response.status})`);
+      }
+      const data = await response.json();
+      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      const jsonStr = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+      try {
+        return JSON.parse(jsonStr);
+      } catch (e) {
+        console.error('Gemini response parse error:', text);
+        throw new Error('Failed to parse AI response. Please try again.');
+      }
+    },
+
+    // ── Error Toast ──
+    _showError(message) {
+      const d = this._getDom();
+      const existing = d.mapEl.parentElement.querySelector('.dv-error-toast');
+      if (existing) existing.remove();
+      const toast = document.createElement('div');
+      toast.className = 'dv-error-toast';
+      toast.innerHTML = `
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="20" height="20">
+          <path d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"/>
+        </svg>
+        <span>${message}</span>`;
+      d.mapEl.parentElement.appendChild(toast);
+      requestAnimationFrame(() => { requestAnimationFrame(() => toast.classList.add('visible')); });
+      setTimeout(() => { toast.classList.remove('visible'); setTimeout(() => toast.remove(), 400); }, 8000);
+    }
+  };
+
   // ── Event Listeners ──
   function bindEvents() {
     dom.themeToggle.addEventListener('click', () => Theme.toggle());
@@ -1117,6 +1927,7 @@ RULES:
     Navigation.init();
     Dashboard.init();
     Missions.init();
+    DroneView.init();
     bindEvents();
 
     document.body.classList.add('app-loaded');

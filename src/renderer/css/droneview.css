@@ -1,0 +1,1041 @@
+/* ============================================
+   DRONE VIEW - Live Drone Tracking Page
+   ============================================ */
+
+/* ── Container ── */
+.droneview-container {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  display: flex;
+}
+
+/* ── Map ── */
+.droneview-map-wrapper {
+  flex: 1;
+  position: relative;
+}
+
+.droneview-map {
+  width: 100%;
+  height: 100%;
+}
+
+.droneview-map .gm-style-cc,
+.droneview-map .gmnoprint:not(.gm-bundled-control) {
+  display: none !important;
+}
+
+/* ── Live Badge (top-left on map) ── */
+.dv-live-badge {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 99px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow), var(--glass-inner-glow);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: 0.5px;
+}
+
+.dv-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 8px rgba(34, 197, 94, 0.6);
+  animation: livePulse 1.5s ease-in-out infinite;
+}
+
+@keyframes livePulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 8px rgba(34, 197, 94, 0.6); }
+  50% { opacity: 0.5; box-shadow: 0 0 4px rgba(34, 197, 94, 0.3); }
+}
+
+.dv-live-label {
+  color: #22c55e;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.dv-drone-id {
+  color: var(--text-secondary);
+  font-weight: 500;
+  margin-left: 4px;
+  padding-left: 8px;
+  border-left: 1px solid var(--glass-border);
+}
+
+/* ── Telemetry Panel (left side, collapsible) ── */
+.dv-telemetry-panel {
+  width: 320px;
+  height: 100%;
+  flex-shrink: 0;
+  order: -1;
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border-right: 1px solid var(--glass-border);
+  box-shadow: 8px 0 32px rgba(0, 0, 0, 0.15);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+  z-index: 15;
+  padding-top: 0;
+  transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+              padding 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+              background var(--transition-fast),
+              border-color var(--transition-fast);
+}
+
+/* Collapsed state */
+.dv-telemetry-panel.collapsed {
+  width: 0;
+  padding: 0;
+  border-right-color: transparent;
+  box-shadow: none;
+  overflow: hidden;
+}
+
+.dv-telemetry-panel.collapsed .dv-progress-section,
+.dv-telemetry-panel.collapsed .dv-panel-section,
+.dv-telemetry-panel.collapsed .dv-panel-collapse-header {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+.dv-telemetry-panel .dv-progress-section,
+.dv-telemetry-panel .dv-panel-section,
+.dv-telemetry-panel .dv-panel-collapse-header {
+  opacity: 1;
+  transition: opacity 0.2s ease 0.15s;
+}
+
+/* Panel header with collapse button */
+.dv-panel-collapse-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px 8px;
+  flex-shrink: 0;
+}
+
+.dv-panel-collapse-title {
+  display: flex;
+  flex-direction: column;
+}
+
+.dv-panel-collapse-title h2 {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.3px;
+}
+
+.dv-panel-collapse-title p {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+  font-weight: 400;
+}
+
+.dv-collapse-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all var(--transition-fast);
+}
+
+.dv-collapse-btn svg {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.dv-collapse-btn:hover {
+  background: var(--glass-bg-hover);
+  border-color: var(--glass-border-hover);
+  color: var(--text-primary);
+}
+
+/* Expand button (floating on map, visible when collapsed) */
+.dv-expand-btn {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  color: var(--text-secondary);
+  cursor: pointer;
+  z-index: 25;
+  box-shadow: var(--glass-shadow);
+  transition: all var(--transition-fast);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-8px);
+}
+
+.dv-expand-btn svg {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.dv-expand-btn.visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(0);
+}
+
+.dv-expand-btn:hover {
+  background: var(--glass-bg-hover);
+  border-color: var(--glass-border-hover);
+  color: var(--text-primary);
+  box-shadow: var(--glass-shadow-hover);
+}
+
+/* Shift live badge when panel is open */
+.dv-live-badge {
+  transition: left 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Shift expand button and live badge when panel collapsed */
+.dv-expand-btn.visible ~ .dv-live-badge {
+  left: 72px;
+}
+
+.dv-panel-section {
+  padding: 20px;
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.dv-panel-section:last-child {
+  border-bottom: none;
+}
+
+.dv-section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.dv-section-header svg {
+  color: var(--accent-primary);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex-shrink: 0;
+}
+
+.dv-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  flex: 1;
+}
+
+/* ── Telemetry Grid ── */
+.dv-telemetry-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.dv-telem-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 14px 8px;
+  border-radius: 12px;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.dv-telem-card:hover {
+  background: var(--glass-bg-hover);
+  border-color: var(--glass-border-hover);
+}
+
+.dv-telem-card.wide {
+  grid-column: 1 / -1;
+}
+
+.dv-telem-icon {
+  font-size: 16px;
+  margin-bottom: 4px;
+  line-height: 1;
+}
+
+.dv-telem-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
+.dv-telem-value.small {
+  font-size: 14px;
+}
+
+.dv-telem-label {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-top: 2px;
+}
+
+.dv-telem-unit {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+}
+
+/* Battery bar */
+.dv-battery-bar {
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--glass-border);
+  margin-top: 6px;
+  overflow: hidden;
+}
+
+.dv-battery-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 1s ease, background-color 0.5s;
+}
+
+.dv-battery-fill.high {
+  background: #22c55e;
+  box-shadow: 0 0 6px rgba(34, 197, 94, 0.4);
+}
+
+.dv-battery-fill.medium {
+  background: #eab308;
+  box-shadow: 0 0 6px rgba(234, 179, 8, 0.4);
+}
+
+.dv-battery-fill.low {
+  background: #ef4444;
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.4);
+}
+
+/* ── Weather Mini Cards ── */
+.dv-weather-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.dv-weather-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 10px 6px;
+  border-radius: 10px;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  transition: background var(--transition-fast);
+}
+
+.dv-weather-card:hover {
+  background: var(--glass-bg-hover);
+}
+
+.dv-weather-card.wide {
+  grid-column: 1 / -1;
+}
+
+.dv-weather-icon {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.dv-weather-value {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.dv-weather-label {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+/* ── AI Action Buttons ── */
+.dv-ai-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dv-ai-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 12px 16px;
+  border-radius: 12px;
+  font-family: var(--font-primary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  position: relative;
+  overflow: hidden;
+}
+
+.dv-ai-btn svg {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex-shrink: 0;
+}
+
+.dv-ai-btn-primary {
+  border: none;
+  background: linear-gradient(135deg, #a855f7 0%, #7c3aed 100%);
+  color: #fff;
+  box-shadow: 0 4px 16px rgba(168, 85, 247, 0.3);
+}
+
+.dv-ai-btn-primary:hover {
+  filter: brightness(1.1);
+  box-shadow: 0 6px 24px rgba(168, 85, 247, 0.4);
+  transform: translateY(-1px);
+}
+
+.dv-ai-btn-primary:active {
+  transform: translateY(0);
+  filter: brightness(0.95);
+}
+
+.dv-ai-btn-secondary {
+  border: 1px solid rgba(168, 85, 247, 0.3);
+  background: rgba(168, 85, 247, 0.08);
+  color: #a855f7;
+}
+
+.dv-ai-btn-secondary:hover {
+  background: rgba(168, 85, 247, 0.15);
+  border-color: rgba(168, 85, 247, 0.5);
+}
+
+.dv-ai-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 99px;
+  background: rgba(168, 85, 247, 0.12);
+  color: #a855f7;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  margin-left: auto;
+}
+
+/* Loading state for AI buttons */
+.dv-ai-btn.loading {
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+.dv-ai-btn.loading .dv-ai-btn-label {
+  display: none;
+}
+
+.dv-ai-btn.loading .dv-ai-btn-spinner {
+  display: block;
+}
+
+.dv-ai-btn-spinner {
+  display: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #fff;
+  animation: spin 0.7s linear infinite;
+}
+
+.dv-ai-btn-secondary .dv-ai-btn-spinner {
+  border-color: rgba(168, 85, 247, 0.3);
+  border-top-color: #a855f7;
+}
+
+/* ── Flight Analysis Panel (floating over map) ── */
+.dv-analysis-panel {
+  position: absolute;
+  top: 60px;
+  left: 16px;
+  width: 400px;
+  max-height: calc(100% - 80px);
+  z-index: 30;
+  border-radius: 16px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25), var(--glass-inner-glow);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-8px);
+  transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.dv-analysis-panel.visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.dv-analysis-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--glass-border);
+  flex-shrink: 0;
+}
+
+.dv-analysis-header svg {
+  color: #a855f7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex-shrink: 0;
+}
+
+.dv-analysis-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  flex: 1;
+}
+
+.dv-analysis-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all var(--transition-fast);
+}
+
+.dv-analysis-close:hover {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+}
+
+.dv-analysis-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-primary);
+}
+
+.dv-analysis-body h3 {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dv-analysis-body h3 svg {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.dv-analysis-body ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.dv-analysis-body ul li {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+
+.dv-analysis-body ul li::before {
+  content: '';
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--accent-primary);
+  flex-shrink: 0;
+  margin-top: 6px;
+}
+
+.dv-analysis-stat-row {
+  display: flex;
+  gap: 8px;
+}
+
+.dv-analysis-stat {
+  flex: 1;
+  padding: 10px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.dv-analysis-stat-value {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.dv-analysis-stat-label {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin-top: 1px;
+}
+
+/* ── AI Route Control Bar (top-center on map) ── */
+.dv-ai-route-bar {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%) translateY(-12px);
+  z-index: 35;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 10px 8px 16px;
+  border-radius: 16px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25), var(--glass-inner-glow);
+  opacity: 0;
+  pointer-events: none;
+  transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.dv-ai-route-bar.visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(-50%) translateY(0);
+}
+
+.dv-ai-route-bar .ai-badge-sm {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 99px;
+  background: rgba(168, 85, 247, 0.12);
+  color: #a855f7;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+
+.dv-ai-route-bar .ai-legend {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.dv-ai-route-bar .legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.dv-ai-route-bar .legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dv-ai-route-bar .legend-dot.legend-current {
+  background: #3b82f6;
+  box-shadow: 0 0 6px rgba(59, 130, 246, 0.4);
+}
+
+.dv-ai-route-bar .legend-dot.legend-alt {
+  background: #a855f7;
+  box-shadow: 0 0 6px rgba(168, 85, 247, 0.4);
+}
+
+.dv-ai-route-bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dv-route-ctrl-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 14px;
+  border-radius: 10px;
+  font-family: var(--font-primary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.dv-route-ctrl-btn svg {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.dv-route-dismiss {
+  border: 1px solid var(--glass-border);
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.dv-route-dismiss:hover {
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #ef4444;
+}
+
+.dv-route-accept {
+  border: none;
+  background: #a855f7;
+  color: #fff;
+  box-shadow: 0 2px 12px rgba(168, 85, 247, 0.3);
+}
+
+.dv-route-accept:hover {
+  filter: brightness(1.1);
+  box-shadow: 0 4px 18px rgba(168, 85, 247, 0.4);
+  transform: translateY(-1px);
+}
+
+.dv-route-accept:active {
+  transform: translateY(0);
+  filter: brightness(0.95);
+}
+
+/* ── AI Loading Overlay ── */
+.dv-loading-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.25);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+
+.dv-loading-overlay.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* ── Compass indicator ── */
+.dv-compass {
+  width: 48px;
+  height: 48px;
+  position: relative;
+}
+
+.dv-compass-ring {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  border: 2px solid var(--glass-border);
+  position: relative;
+}
+
+.dv-compass-needle {
+  position: absolute;
+  top: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-bottom: 14px solid #ef4444;
+  transition: transform 1s ease;
+}
+
+.dv-compass-label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--text-tertiary);
+  margin-top: 8px;
+}
+
+/* ── Mission Progress Bar ── */
+.dv-progress-section {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.dv-progress-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.dv-progress-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+
+.dv-progress-value {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent-primary);
+}
+
+.dv-progress-track {
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--glass-border);
+  overflow: hidden;
+}
+
+.dv-progress-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent-primary);
+  box-shadow: 0 0 8px rgba(var(--accent-primary-rgb), 0.4);
+  transition: width 1s ease;
+}
+
+/* ── Waypoint ETA list ── */
+.dv-wp-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dv-wp-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  transition: background var(--transition-fast);
+}
+
+.dv-wp-item:hover {
+  background: var(--glass-bg-hover);
+}
+
+.dv-wp-item.active {
+  background: rgba(var(--accent-primary-rgb), 0.08);
+}
+
+.dv-wp-item.completed {
+  opacity: 0.5;
+}
+
+.dv-wp-marker {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 700;
+  flex-shrink: 0;
+  border: 2px solid;
+}
+
+.dv-wp-marker.type-takeoff {
+  background: rgba(34, 197, 94, 0.15);
+  border-color: rgba(34, 197, 94, 0.5);
+  color: #22c55e;
+}
+
+.dv-wp-marker.type-waypoint {
+  background: rgba(var(--accent-primary-rgb), 0.15);
+  border-color: rgba(var(--accent-primary-rgb), 0.5);
+  color: var(--accent-primary);
+}
+
+.dv-wp-marker.type-rtl {
+  background: rgba(249, 115, 22, 0.15);
+  border-color: rgba(249, 115, 22, 0.5);
+  color: #f97316;
+}
+
+.dv-wp-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.dv-wp-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dv-wp-eta {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  font-family: 'SF Mono', monospace;
+}
+
+.dv-wp-status {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 99px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  flex-shrink: 0;
+}
+
+.dv-wp-status.reached {
+  background: rgba(34, 197, 94, 0.12);
+  color: #22c55e;
+}
+
+.dv-wp-status.next {
+  background: rgba(var(--accent-primary-rgb), 0.12);
+  color: var(--accent-primary);
+}
+
+.dv-wp-status.pending {
+  background: var(--glass-bg);
+  color: var(--text-tertiary);
+}
+
+/* ── Error toast for drone view ── */
+.dv-error-toast {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(8px);
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 20px;
+  border-radius: 14px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  opacity: 0;
+  pointer-events: none;
+  transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.dv-error-toast.visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(-50%) translateY(0);
+}
+
+.dv-error-toast svg {
+  color: #ef4444;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex-shrink: 0;
+}
