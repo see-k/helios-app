@@ -9,6 +9,7 @@ let _navigate = null;
 export const Reports = {
   _dom: null,
   _aiResult: null,
+  _lastFlightDataId: null,
   _charts: [],
 
   _getDom() {
@@ -25,6 +26,13 @@ export const Reports = {
   },
 
   onEnter() {
+    // Clear cached AI result when flight data changes (different drone/session)
+    const fd = state.flightData;
+    const currentId = fd ? `${fd.droneId}_${fd.missionStart}` : null;
+    if (currentId !== this._lastFlightDataId) {
+      this._aiResult = null;
+      this._lastFlightDataId = currentId;
+    }
     this._render();
   },
 
