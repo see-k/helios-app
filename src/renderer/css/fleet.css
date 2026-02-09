@@ -894,6 +894,381 @@
   color: #f87171;
 }
 
+/* ── Console Button ── */
+.fleet-btn-console:hover {
+  color: #a78bfa;
+  border-color: rgba(167,139,250,0.3);
+  background: rgba(167,139,250,0.08);
+}
+
+/* ── Console Overlay ── */
+.fleet-console-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.25s ease, visibility 0.25s ease;
+}
+
+.fleet-console-overlay.visible {
+  opacity: 1;
+  visibility: visible;
+}
+
+.fleet-console-modal {
+  width: 90%;
+  max-width: 860px;
+  height: 75vh;
+  display: flex;
+  flex-direction: column;
+  border-radius: 16px;
+  border: 1px solid var(--glass-border);
+  background: rgba(10,12,18,0.96);
+  box-shadow: 0 24px 80px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04) inset;
+  overflow: hidden;
+  transform: translateY(20px) scale(0.97);
+  transition: transform 0.25s ease;
+}
+
+.fleet-console-overlay.visible .fleet-console-modal {
+  transform: translateY(0) scale(1);
+}
+
+/* ── Console Header ── */
+.fleet-console-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  background: rgba(255,255,255,0.02);
+  flex-shrink: 0;
+}
+
+.fleet-console-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.fleet-console-header-left > svg {
+  flex-shrink: 0;
+  color: #a78bfa;
+  width: 18px;
+  height: 18px;
+}
+
+.fleet-console-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fleet-console-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 10px;
+  border-radius: 20px;
+  white-space: nowrap;
+}
+
+.fleet-console-status.connecting {
+  color: #facc15;
+  background: rgba(250,204,21,0.1);
+}
+
+.fleet-console-status.online {
+  color: #22c55e;
+  background: rgba(34,197,94,0.1);
+}
+
+.fleet-console-status.offline {
+  color: #ef4444;
+  background: rgba(239,68,68,0.1);
+}
+
+.fleet-console-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.fleet-console-status.connecting .fleet-console-status-dot {
+  background: #facc15;
+  animation: consoleDotPulse 1s ease-in-out infinite;
+}
+
+.fleet-console-status.online .fleet-console-status-dot {
+  background: #22c55e;
+  box-shadow: 0 0 6px rgba(34,197,94,0.5);
+}
+
+.fleet-console-status.offline .fleet-console-status-dot {
+  background: #ef4444;
+}
+
+@keyframes consoleDotPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.fleet-console-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fleet-console-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 500;
+  font-family: var(--font-primary);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  outline: none;
+}
+
+.fleet-console-action-btn:hover {
+  background: rgba(255,255,255,0.06);
+  color: var(--text-primary);
+  border-color: rgba(255,255,255,0.12);
+}
+
+.fleet-console-action-btn.paused {
+  color: #22c55e;
+  border-color: rgba(34,197,94,0.3);
+  background: rgba(34,197,94,0.08);
+}
+
+.fleet-console-action-btn svg {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fleet-console-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  outline: none;
+  margin-left: 4px;
+}
+
+.fleet-console-close:hover {
+  background: rgba(239,68,68,0.12);
+  color: #ef4444;
+}
+
+.fleet-console-close svg {
+  width: 16px;
+  height: 16px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ── Console Body ── */
+.fleet-console-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 0;
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.fleet-console-body::-webkit-scrollbar {
+  width: 6px;
+}
+
+.fleet-console-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.fleet-console-body::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.1);
+  border-radius: 3px;
+}
+
+.fleet-console-body::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,255,255,0.18);
+}
+
+/* ── Console Entry ── */
+.fleet-console-entry {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 1px 16px;
+  transition: background 0.1s;
+}
+
+.fleet-console-entry:hover {
+  background: rgba(255,255,255,0.02);
+}
+
+/* ── Telemetry Group ── */
+.fleet-console-group {
+  border-left: 2px solid rgba(255,255,255,0.06);
+  margin: 4px 0 4px 16px;
+  padding-left: 0;
+}
+
+.fleet-console-group .fleet-console-entry {
+  padding-left: 12px;
+}
+
+.fleet-console-group .fleet-console-entry:first-child {
+  padding-top: 2px;
+}
+
+.fleet-console-group .fleet-console-entry:last-child {
+  padding-bottom: 2px;
+}
+
+.fleet-console-group:hover {
+  border-left-color: rgba(255,255,255,0.12);
+}
+
+.fleet-console-ts {
+  flex-shrink: 0;
+  color: rgba(255,255,255,0.25);
+  font-size: 11px;
+  min-width: 90px;
+  user-select: all;
+}
+
+.fleet-console-tag {
+  flex-shrink: 0;
+  display: inline-block;
+  min-width: 32px;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  line-height: 1.6;
+}
+
+.fleet-console-tag.system {
+  color: #94a3b8;
+  background: rgba(148,163,184,0.1);
+}
+
+.fleet-console-tag.error {
+  color: #ef4444;
+  background: rgba(239,68,68,0.12);
+}
+
+.fleet-console-tag.sent {
+  color: #38bdf8;
+  background: rgba(56,189,248,0.1);
+}
+
+.fleet-console-tag.position {
+  color: #22c55e;
+  background: rgba(34,197,94,0.1);
+}
+
+.fleet-console-tag.attitude {
+  color: #f59e0b;
+  background: rgba(245,158,11,0.1);
+}
+
+.fleet-console-tag.battery {
+  color: #a78bfa;
+  background: rgba(167,139,250,0.1);
+}
+
+.fleet-console-tag.data {
+  color: #60a5fa;
+  background: rgba(96,165,250,0.1);
+}
+
+.fleet-console-msg {
+  color: rgba(255,255,255,0.75);
+  word-break: break-all;
+  min-width: 0;
+}
+
+.fleet-console-entry.error .fleet-console-msg {
+  color: #f87171;
+}
+
+.fleet-console-entry.system .fleet-console-msg {
+  color: #94a3b8;
+  font-style: italic;
+}
+
+/* ── Key-Value Telemetry Pairs ── */
+.fleet-console-kv {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.fc-pair {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.fc-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  color: rgba(255,255,255,0.3);
+  text-transform: uppercase;
+}
+
+.fc-value {
+  color: rgba(255,255,255,0.85);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Color-tinted values per type */
+.fleet-console-entry.position .fc-value {
+  color: #86efac;
+}
+
+.fleet-console-entry.attitude .fc-value {
+  color: #fcd34d;
+}
+
+.fleet-console-entry.battery .fc-value {
+  color: #c4b5fd;
+}
+
 /* ── Responsive ── */
 @media (max-width: 700px) {
   .fleet-drone-details {
@@ -907,5 +1282,19 @@
   .fleet-header {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .fleet-console-modal {
+    width: 96%;
+    height: 80vh;
+  }
+
+  .fleet-console-header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .fleet-console-ts {
+    display: none;
   }
 }

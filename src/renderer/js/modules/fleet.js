@@ -6,6 +6,14 @@ let _drones = [];
 let _editingId = null;
 let _connectionVerified = false;
 
+// ── Console state ──
+let _consoleWs = null;
+let _consoleDroneId = null;
+let _consoleLogs = [];
+const MAX_CONSOLE_LOGS = 500;
+let _consoleAutoScroll = true;
+let _consolePaused = false;
+
 /* ── Icon SVGs ── */
 const icons = {
   plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M12 5v14m-7-7h14"/></svg>',
@@ -15,7 +23,8 @@ const icons = {
   drone: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="20" height="20"><path d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"/><path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>',
   close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M6 18L18 6M6 6l12 12"/></svg>',
   fleet: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="20" height="20"><path d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"/></svg>',
-  refresh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="16" height="16"><path d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182"/></svg>'
+  refresh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="16" height="16"><path d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182"/></svg>',
+  console: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="16" height="16"><path d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0021 18V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v12a2.25 2.25 0 002.25 2.25z"/></svg>'
 };
 
 /* ── Status config ── */
@@ -70,6 +79,7 @@ export const Fleet = {
 
   onLeave() {
     this._hideForm();
+    this._closeConsole();
   },
 
   /* ── Data ── */
@@ -142,6 +152,10 @@ export const Fleet = {
               ${icons.ping}
               <span>Ping</span>
             </button>
+            <button class="fleet-action-btn fleet-btn-console" data-action="console" data-id="${drone.id}" title="Open telemetry console">
+              ${icons.console}
+              <span>Console</span>
+            </button>
             <button class="fleet-action-btn fleet-btn-edit" data-action="edit" data-id="${drone.id}" title="Edit drone">
               ${icons.edit}
               <span>Edit</span>
@@ -163,6 +177,7 @@ export const Fleet = {
         const action = btn.dataset.action;
         const id = parseInt(btn.dataset.id, 10);
         if (action === 'ping') this._pingDrone(id, btn);
+        else if (action === 'console') this._openConsole(id);
         else if (action === 'edit') this._editDrone(id);
         else if (action === 'delete') this._deleteDrone(id);
       });
@@ -462,6 +477,296 @@ export const Fleet = {
     } catch (err) {
       console.error('Save failed:', err);
     }
+  },
+
+  /* ── Console ── */
+  _openConsole(id) {
+    const drone = _drones.find(d => d.id === id);
+    if (!drone) return;
+
+    // Close any existing console session
+    this._closeConsole();
+
+    _consoleDroneId = id;
+    _consoleLogs = [];
+    _consoleAutoScroll = true;
+    _consolePaused = false;
+
+    // Ensure overlay exists
+    this._ensureConsoleOverlay();
+
+    const overlay = document.getElementById('fleetConsoleOverlay');
+    const title = document.getElementById('fleetConsoleTitle');
+    const body = document.getElementById('fleetConsoleBody');
+    const statusEl = document.getElementById('fleetConsoleStatus');
+    const pauseBtn = document.getElementById('btnConsolePause');
+
+    if (title) title.textContent = `${this._esc(drone.name)} — ${this._esc(drone.hostname)}:5000`;
+    if (body) body.innerHTML = '';
+    if (statusEl) {
+      statusEl.className = 'fleet-console-status connecting';
+      statusEl.innerHTML = '<span class="fleet-console-status-dot"></span>Connecting...';
+    }
+    if (pauseBtn) pauseBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg><span>Pause</span>`;
+
+    overlay.classList.add('visible');
+
+    this._appendConsoleLog('system', `Connecting to ws://${drone.hostname}:5000/ws/telemetry...`);
+    this._connectConsoleWs(drone.hostname);
+  },
+
+  _closeConsole() {
+    this._disconnectConsoleWs();
+    _consoleDroneId = null;
+    _consoleLogs = [];
+    _consolePaused = false;
+    const overlay = document.getElementById('fleetConsoleOverlay');
+    if (overlay) overlay.classList.remove('visible');
+  },
+
+  _connectConsoleWs(hostname) {
+    this._disconnectConsoleWs();
+    const url = `ws://${hostname}:5000/ws/telemetry`;
+
+    try {
+      _consoleWs = new WebSocket(url);
+
+      _consoleWs.onopen = () => {
+        this._appendConsoleLog('system', 'WebSocket connected. Subscribing to all channels...');
+        _consoleWs.send(JSON.stringify({ subscribe: ['all'] }));
+        this._appendConsoleLog('sent', '{ "subscribe": ["all"] }');
+        const statusEl = document.getElementById('fleetConsoleStatus');
+        if (statusEl) {
+          statusEl.className = 'fleet-console-status online';
+          statusEl.innerHTML = '<span class="fleet-console-status-dot"></span>Connected';
+        }
+      };
+
+      _consoleWs.onmessage = (event) => {
+        if (_consolePaused) return;
+        try {
+          const data = JSON.parse(event.data);
+          this._appendTelemetryGroup(data);
+        } catch (e) {
+          this._appendConsoleLog('data', event.data);
+        }
+      };
+
+      _consoleWs.onclose = (event) => {
+        this._appendConsoleLog('system', `WebSocket closed (code: ${event.code}${event.reason ? ', reason: ' + event.reason : ''})`);
+        _consoleWs = null;
+        const statusEl = document.getElementById('fleetConsoleStatus');
+        if (statusEl) {
+          statusEl.className = 'fleet-console-status offline';
+          statusEl.innerHTML = '<span class="fleet-console-status-dot"></span>Disconnected';
+        }
+      };
+
+      _consoleWs.onerror = () => {
+        this._appendConsoleLog('error', `WebSocket error — is the Helios SBC Service running on ${hostname}:5000?`);
+      };
+    } catch (err) {
+      this._appendConsoleLog('error', `Failed to create WebSocket: ${err.message}`);
+    }
+  },
+
+  _disconnectConsoleWs() {
+    if (_consoleWs) {
+      _consoleWs.onclose = null;
+      _consoleWs.close();
+      _consoleWs = null;
+    }
+  },
+
+  _toggleConsolePause() {
+    _consolePaused = !_consolePaused;
+    const pauseBtn = document.getElementById('btnConsolePause');
+    if (pauseBtn) {
+      if (_consolePaused) {
+        pauseBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z"/></svg><span>Resume</span>`;
+        pauseBtn.classList.add('paused');
+        this._appendConsoleLog('system', 'Stream paused');
+      } else {
+        pauseBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg><span>Pause</span>`;
+        pauseBtn.classList.remove('paused');
+        this._appendConsoleLog('system', 'Stream resumed');
+      }
+    }
+  },
+
+  _clearConsole() {
+    _consoleLogs = [];
+    const body = document.getElementById('fleetConsoleBody');
+    if (body) body.innerHTML = '';
+    this._appendConsoleLog('system', 'Console cleared');
+  },
+
+  _appendConsoleLog(type, message) {
+    const body = document.getElementById('fleetConsoleBody');
+    if (!body) return;
+
+    const ts = this._consoleTimestamp();
+    _consoleLogs.push({ type, message, ts });
+    this._pruneConsoleLogs(body);
+
+    const entry = document.createElement('div');
+    entry.className = `fleet-console-entry ${type}`;
+    entry.innerHTML = `
+      <span class="fleet-console-ts">${ts}</span>
+      <span class="fleet-console-tag ${type}">${this._tagLabel(type)}</span>
+      <span class="fleet-console-msg">${this._esc(message)}</span>
+    `;
+    body.appendChild(entry);
+    this._consoleScrollToBottom(body);
+  },
+
+  _appendTelemetryGroup(data) {
+    const body = document.getElementById('fleetConsoleBody');
+    if (!body) return;
+
+    const ts = this._consoleTimestamp();
+    _consoleLogs.push({ type: 'telemetry', data, ts });
+    this._pruneConsoleLogs(body);
+
+    const group = document.createElement('div');
+    group.className = 'fleet-console-group';
+
+    const rows = [];
+
+    if (data.position) {
+      const p = data.position;
+      rows.push(this._telemetryRow('position', 'POS', ts, [
+        ['LAT', `${p.latitude_deg}°`],
+        ['LNG', `${p.longitude_deg}°`],
+        ['ALT', `${p.relative_altitude_m ?? p.absolute_altitude_m ?? '—'}m`],
+      ]));
+    }
+
+    if (data.attitude) {
+      const a = data.attitude;
+      rows.push(this._telemetryRow('attitude', 'ATT', null, [
+        ['ROLL', `${a.roll_deg}°`],
+        ['PITCH', `${a.pitch_deg}°`],
+        ['YAW', `${a.yaw_deg}°`],
+      ]));
+    }
+
+    if (data.battery) {
+      const b = data.battery;
+      rows.push(this._telemetryRow('battery', 'BAT', null, [
+        ['V', `${b.voltage_v}V`],
+        ['CHG', `${b.remaining_percent}%`],
+      ]));
+    }
+
+    // Fallback: if message has none of the known keys, dump as JSON
+    if (rows.length === 0) {
+      const entry = document.createElement('div');
+      entry.className = 'fleet-console-entry data';
+      entry.innerHTML = `
+        <span class="fleet-console-ts">${ts}</span>
+        <span class="fleet-console-tag data">DAT</span>
+        <span class="fleet-console-msg">${this._esc(JSON.stringify(data))}</span>
+      `;
+      group.appendChild(entry);
+    } else {
+      rows.forEach(r => group.appendChild(r));
+    }
+
+    body.appendChild(group);
+    this._consoleScrollToBottom(body);
+  },
+
+  _telemetryRow(type, tag, ts, fields) {
+    const entry = document.createElement('div');
+    entry.className = `fleet-console-entry ${type}`;
+
+    const kvHtml = fields.map(([label, value]) =>
+      `<span class="fc-pair"><span class="fc-label">${label}</span><span class="fc-value">${this._esc(value)}</span></span>`
+    ).join('');
+
+    entry.innerHTML = `
+      <span class="fleet-console-ts">${ts || ''}</span>
+      <span class="fleet-console-tag ${type}">${tag}</span>
+      <span class="fleet-console-msg fleet-console-kv">${kvHtml}</span>
+    `;
+    return entry;
+  },
+
+  _consoleTimestamp() {
+    const now = new Date();
+    return now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+      + '.' + String(now.getMilliseconds()).padStart(3, '0');
+  },
+
+  _tagLabel(type) {
+    const map = { system: 'SYS', error: 'ERR', sent: 'OUT', position: 'POS', attitude: 'ATT', battery: 'BAT', data: 'DAT' };
+    return map[type] || 'MSG';
+  },
+
+  _pruneConsoleLogs(body) {
+    if (_consoleLogs.length > MAX_CONSOLE_LOGS) {
+      _consoleLogs.shift();
+      if (body.firstChild) body.removeChild(body.firstChild);
+    }
+  },
+
+  _consoleScrollToBottom(body) {
+    if (_consoleAutoScroll) {
+      body.scrollTop = body.scrollHeight;
+    }
+  },
+
+  _ensureConsoleOverlay() {
+    if (document.getElementById('fleetConsoleOverlay')) return;
+
+    const overlay = document.createElement('div');
+    overlay.id = 'fleetConsoleOverlay';
+    overlay.className = 'fleet-console-overlay';
+    overlay.innerHTML = `
+      <div class="fleet-console-modal">
+        <div class="fleet-console-header">
+          <div class="fleet-console-header-left">
+            ${icons.console}
+            <span class="fleet-console-title" id="fleetConsoleTitle">Telemetry Console</span>
+            <span class="fleet-console-status connecting" id="fleetConsoleStatus">
+              <span class="fleet-console-status-dot"></span>Connecting...
+            </span>
+          </div>
+          <div class="fleet-console-header-actions">
+            <button class="fleet-console-action-btn" id="btnConsolePause" title="Pause/Resume stream">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+              <span>Pause</span>
+            </button>
+            <button class="fleet-console-action-btn" id="btnConsoleClear" title="Clear console">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"/></svg>
+              <span>Clear</span>
+            </button>
+            <button class="fleet-console-close" id="btnConsoleClose" title="Close console">
+              ${icons.close}
+            </button>
+          </div>
+        </div>
+        <div class="fleet-console-body" id="fleetConsoleBody"></div>
+      </div>
+    `;
+
+    document.getElementById('pageFleet').appendChild(overlay);
+
+    // Bind events
+    document.getElementById('btnConsoleClose').addEventListener('click', () => this._closeConsole());
+    document.getElementById('btnConsolePause').addEventListener('click', () => this._toggleConsolePause());
+    document.getElementById('btnConsoleClear').addEventListener('click', () => this._clearConsole());
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) this._closeConsole();
+    });
+
+    // Detect manual scroll to disable auto-scroll
+    const body = document.getElementById('fleetConsoleBody');
+    body.addEventListener('scroll', () => {
+      const atBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 40;
+      _consoleAutoScroll = atBottom;
+    });
   },
 
   /* ── Helpers ── */
