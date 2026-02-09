@@ -53,7 +53,7 @@ export const Reports = {
             <path d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/>
           </svg>
           <h2 class="rpt-no-data-title">No Flight Data</h2>
-          <p class="rpt-no-data-text">Complete a drone simulation to generate a report with telemetry, charts, and AI assessment.</p>
+          <p class="rpt-no-data-text">Launch a drone view and generate a report at any time — during the flight or after mission completion.</p>
           <button class="rpt-no-data-btn" id="rptGoToDrone">
             ${RptIcons.drone} Go to Drone View
           </button>
@@ -70,8 +70,16 @@ export const Reports = {
     const startTime = startDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
     const endTime = endDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
     const batteryUsed = fd.batteryStart - fd.batteryEnd;
-    const efficiencyPct = Math.max(60, Math.min(98, Math.round(100 - batteryUsed * 0.4 + fd.waypointsVisited)));
+    const efficiencyPct = Math.max(60, Math.min(98, Math.round(100 - batteryUsed * 0.4 + (fd.waypointsVisited || 0))));
     const gpsAccuracy = (1.2 + Math.random() * 0.6).toFixed(1);
+    const isInProgress = fd.missionStatus && fd.missionStatus !== 'complete';
+    const statusBadge = isInProgress
+      ? `<span class="rpt-header-badge rpt-badge-progress"><span class="rpt-badge-dot progress"></span> In Progress</span>`
+      : `<span class="rpt-header-badge rpt-badge-complete"><span class="rpt-badge-dot"></span> Complete</span>`;
+    const wpLabel = fd.waypointsTotal
+      ? `${fd.waypointsVisited || 0} / ${fd.waypointsTotal}`
+      : `${fd.waypointsVisited || 0}`;
+    const wpSub = isInProgress ? 'Visited so far' : 'All visited';
 
     const logRows = fd.flightLog.map(l => {
       const t = new Date(l.time);
@@ -90,7 +98,7 @@ export const Reports = {
         </div>
         <div class="rpt-header-actions">
           <span class="rpt-header-badge rpt-badge-demo">Simulated</span>
-          <span class="rpt-header-badge rpt-badge-complete"><span class="rpt-badge-dot"></span> Complete</span>
+          ${statusBadge}
           <button class="rpt-export-btn" id="btnExportPdf">${RptIcons.pdf} Export PDF</button>
         </div>
       </div>
@@ -125,7 +133,7 @@ export const Reports = {
         <div class="rpt-stat-card"><div class="rpt-stat-icon">${RptIcons.speed}</div><span class="rpt-stat-value">${fd.avgSpeed}</span><span class="rpt-stat-label">Avg km/h</span></div>
         <div class="rpt-stat-card"><div class="rpt-stat-icon">${RptIcons.altitude}</div><span class="rpt-stat-value">${fd.maxAltitude}m</span><span class="rpt-stat-label">Max Alt</span></div>
         <div class="rpt-stat-card"><div class="rpt-stat-icon">${RptIcons.battery}</div><span class="rpt-stat-value">${batteryUsed}%</span><span class="rpt-stat-label">Battery Used</span><span class="rpt-stat-sub">${fd.batteryEnd}% remaining</span></div>
-        <div class="rpt-stat-card"><div class="rpt-stat-icon">${RptIcons.pin}</div><span class="rpt-stat-value">${fd.waypointsVisited}</span><span class="rpt-stat-label">Waypoints</span><span class="rpt-stat-sub">All visited</span></div>
+        <div class="rpt-stat-card"><div class="rpt-stat-icon">${RptIcons.pin}</div><span class="rpt-stat-value">${wpLabel}</span><span class="rpt-stat-label">Waypoints</span><span class="rpt-stat-sub">${wpSub}</span></div>
       </div>
 
       <!-- Charts -->

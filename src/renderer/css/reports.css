@@ -87,6 +87,16 @@
   color: var(--text-tertiary);
 }
 
+.rpt-badge-progress {
+  background: rgba(251, 191, 36, 0.08);
+  border: 1px solid rgba(251, 191, 36, 0.25);
+  color: #fbbf24;
+}
+
+.rpt-badge-progress .rpt-badge-dot.progress {
+  background: #fbbf24;
+}
+
 /* ── Export Button ── */
 .rpt-export-btn {
   display: flex;

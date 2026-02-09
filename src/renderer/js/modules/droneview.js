@@ -123,7 +123,9 @@ export const DroneView = {
       mcDistance: document.getElementById('dvMcDistance'),
       mcBattery: document.getElementById('dvMcBattery'),
       btnViewReport: document.getElementById('btnViewReport'),
-      btnRestartMission: document.getElementById('btnRestartMission')
+      btnRestartMission: document.getElementById('btnRestartMission'),
+      // Flight report
+      btnGenerateReport: document.getElementById('btnGenerateReport')
     };
     return this._dom;
   },
@@ -143,19 +145,24 @@ export const DroneView = {
     d.dvAddDroneBtn?.addEventListener('click', () => this._showInterstitial());
     d.dvViewFleetBtn?.addEventListener('click', () => this._viewEntireFleet());
 
-    d.btnFlightAnalysis.addEventListener('click', () => this._requestFlightAnalysis());
-    d.btnAltRoutes.addEventListener('click', () => this._requestAltRoutes());
-    d.btnCloseAnalysis.addEventListener('click', () => d.analysisPanel.classList.remove('visible'));
-    d.btnDismissRoutes.addEventListener('click', () => this._dismissAltRoutes());
-    d.btnAcceptRoute.addEventListener('click', () => this._acceptAltRoute());
-    d.btnCollapse.addEventListener('click', () => this._togglePanel(false));
-    d.btnExpand.addEventListener('click', () => this._togglePanel(true));
+    d.btnFlightAnalysis?.addEventListener('click', () => this._requestFlightAnalysis());
+    d.btnAltRoutes?.addEventListener('click', () => this._requestAltRoutes());
+    d.btnCloseAnalysis?.addEventListener('click', () => d.analysisPanel.classList.remove('visible'));
+    d.btnDismissRoutes?.addEventListener('click', () => this._dismissAltRoutes());
+    d.btnAcceptRoute?.addEventListener('click', () => this._acceptAltRoute());
+    d.btnCollapse?.addEventListener('click', () => this._togglePanel(false));
+    d.btnExpand?.addEventListener('click', () => this._togglePanel(true));
 
-    d.btnViewReport.addEventListener('click', () => {
+    d.btnGenerateReport?.addEventListener('click', () => {
+      console.log('[DroneView] Generate Report button clicked, activeDroneId:', this._activeDroneId);
+      this._generateReportForActiveDrone();
+    });
+
+    d.btnViewReport?.addEventListener('click', () => {
       d.missionCompleteOverlay.classList.remove('visible');
       if (_navigate) _navigate('reports');
     });
-    d.btnRestartMission.addEventListener('click', () => {
+    d.btnRestartMission?.addEventListener('click', () => {
       d.missionCompleteOverlay.classList.remove('visible');
       const entry = this._getActiveDrone();
       if (entry && entry.mode === 'demo') {
@@ -940,7 +947,7 @@ export const DroneView = {
     for (let i = 1; i < wps.length; i++) {
       totalDist += haversine(wps[i - 1].lat, wps[i - 1].lng, wps[i].lat, wps[i].lng);
     }
-    const distStr = totalDist >= 1000 ? (totalDist / 1000).toFixed(1) + ' km' : Math.round(totalDist) + ' m';
+    const distanceStr = totalDist >= 1000 ? (totalDist / 1000).toFixed(1) + ' km' : Math.round(totalDist) + ' m';
     const batteryLeft = Math.round(entry.telemetry.battery) + '%';
 
     entry.flightLog.push({ time: new Date().toISOString(), event: 'land', detail: 'Drone landed safely at launch site' });
@@ -949,7 +956,7 @@ export const DroneView = {
     if (entry.id === this._activeDroneId) {
       const d = this._getDom();
       d.mcDuration.textContent = durationStr;
-      d.mcDistance.textContent = distStr;
+      d.mcDistance.textContent = distanceStr;
       d.mcBattery.textContent = batteryLeft;
       d.missionCompleteOverlay.classList.add('visible');
       this._updateProgress(entry);
@@ -962,6 +969,7 @@ export const DroneView = {
       droneId: entry.fleetId ? `ID-${entry.fleetId}` : entry.id,
       missionStart: new Date(entry.missionStartTime).toISOString(),
       missionEnd: new Date().toISOString(),
+      missionStatus: 'complete',
       durationMs: elapsed,
       durationStr,
       totalDistanceM: totalDist,
@@ -969,11 +977,12 @@ export const DroneView = {
       batteryStart: 100,
       batteryEnd: Math.round(entry.telemetry.battery),
       waypointsVisited: wps.length,
+      waypointsTotal: wps.length,
       maxAltitude: Math.max(...wps.map(w => w.alt)),
       avgSpeed: +(42 + Math.random() * 6).toFixed(1),
       maxSpeed: +(48 + Math.random() * 8).toFixed(1),
       satellites: entry.telemetry.satellites,
-      weatherSummary: this._getDom().weatherCondition.textContent || 'Unknown',
+      weatherSummary: this._getDom().weatherCondition?.textContent || 'Unknown',
       flightLog: [...entry.flightLog],
       waypoints: wps.map(w => ({ ...w })),
       telemetrySnapshot: { ...entry.telemetry }
@@ -1556,6 +1565,93 @@ RULES:
     this._rebuildWaypointMarkers(entry);
     this._renderWaypointList(entry);
     this._dismissAltRoutes();
+  },
+
+  // ══════════════════════════════════════════
+  //  FLIGHT REPORT SNAPSHOT
+  // ══════════════════════════════════════════
+
+  _generateReportForActiveDrone() {
+    try {
+      const entry = this._getActiveDrone();
+      if (!entry) {
+        this._showError('No active drone selected.');
+        return;
+      }
+
+      const t = entry.telemetry || {};
+      const wps = entry.waypoints || [];
+      const now = Date.now();
+      const elapsed = entry.missionStartTime ? now - entry.missionStartTime : 0;
+      const durationMin = Math.round(elapsed / 60000);
+      const durationStr = durationMin < 1 ? '<1 min' : durationMin + ' min';
+
+      // Calculate total route distance
+      let totalDist = 0;
+      for (let i = 1; i < wps.length; i++) {
+        totalDist += haversine(wps[i - 1].lat, wps[i - 1].lng, wps[i].lat, wps[i].lng);
+      }
+      const distanceStr = totalDist >= 1000 ? (totalDist / 1000).toFixed(1) + ' km' : Math.round(totalDist) + ' m';
+
+      // Determine mission status
+      let missionStatus;
+      if (entry.missionComplete) {
+        missionStatus = 'complete';
+      } else if (entry.mode === 'demo') {
+        const pct = wps.length > 1 ? Math.round(((entry.simIndex + entry.simFraction) / (wps.length - 1)) * 100) : 0;
+        missionStatus = `in-progress (${pct}%)`;
+      } else {
+        const pct = wps.length > 0 ? Math.round((entry.visitedWaypoints.size / wps.length) * 100) : 0;
+        missionStatus = `in-progress (${pct}%)`;
+      }
+
+      // Compute altitude safely (avoid Math.max with empty spread)
+      const altitudes = wps.map(w => w.alt).filter(a => typeof a === 'number');
+      const maxAlt = altitudes.length > 0 ? Math.max(...altitudes) : Math.round(t.altitude || 0);
+
+      // Compute speed values
+      const speedNum = parseFloat(t.speed) || 0;
+      const avgSpeed = +(speedNum * 0.85).toFixed(1);
+      const maxSpeed = +(speedNum * 1.15).toFixed(1);
+
+      const d = this._getDom();
+
+      // Hide the mission-complete overlay if it's showing
+      if (d.missionCompleteOverlay) {
+        d.missionCompleteOverlay.classList.remove('visible');
+      }
+
+      state.flightData = {
+        droneModel: `${entry.name}${entry.model ? ' \u2014 ' + entry.model : ''}`,
+        droneId: entry.fleetId ? `ID-${entry.fleetId}` : entry.id,
+        missionStart: entry.missionStartTime ? new Date(entry.missionStartTime).toISOString() : new Date().toISOString(),
+        missionEnd: new Date().toISOString(),
+        missionStatus,
+        durationMs: elapsed,
+        durationStr,
+        totalDistanceM: totalDist,
+        distanceStr,
+        batteryStart: 100,
+        batteryEnd: Math.round(t.battery ?? 100),
+        waypointsVisited: entry.mode === 'demo' ? (entry.simIndex || 0) + 1 : (entry.visitedWaypoints?.size || 0),
+        waypointsTotal: wps.length,
+        maxAltitude: maxAlt,
+        avgSpeed,
+        maxSpeed,
+        satellites: t.satellites || 0,
+        weatherSummary: d.weatherCondition?.textContent || 'Unknown',
+        flightLog: [...(entry.flightLog || [])],
+        waypoints: wps.map(w => ({ ...w })),
+        telemetrySnapshot: { ...t }
+      };
+
+      if (_navigate) {
+        _navigate('reports');
+      }
+    } catch (err) {
+      console.error('[DroneView] Report generation error:', err);
+      this._showError('Failed to generate report: ' + err.message);
+    }
   },
 
   // ── Error Toast ──
