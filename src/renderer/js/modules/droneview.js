@@ -8,6 +8,17 @@ import { loadGoogleMaps } from '../services/maps-loader.js';
 // ── Injected callback (set via init) ──
 let _navigate = null;
 
+// Default demo waypoints (San Francisco)
+const _DEFAULT_WAYPOINTS = [
+  { lat: 37.7749, lng: -122.4194, label: 'Take Off', type: 'takeoff', alt: 0 },
+  { lat: 37.7820, lng: -122.4060, label: 'WP 1 — Financial District', type: 'waypoint', alt: 85 },
+  { lat: 37.7900, lng: -122.3950, label: 'WP 2 — Embarcadero', type: 'waypoint', alt: 110 },
+  { lat: 37.8025, lng: -122.4058, label: 'WP 3 — Fisherman\'s Wharf', type: 'waypoint', alt: 95 },
+  { lat: 37.8080, lng: -122.4177, label: 'WP 4 — Ghirardelli Square', type: 'waypoint', alt: 75 },
+  { lat: 37.7990, lng: -122.4310, label: 'WP 5 — Marina', type: 'waypoint', alt: 60 },
+  { lat: 37.7749, lng: -122.4194, label: 'Return to Launch', type: 'rtl', alt: 0 }
+];
+
 export const DroneView = {
   _map: null,
   _loadAttempted: false,
@@ -28,16 +39,21 @@ export const DroneView = {
   _lastAltRoutes: null,
   _dom: null,
 
-  // Simulated mission waypoints (San Francisco default)
-  _missionWaypoints: [
-    { lat: 37.7749, lng: -122.4194, label: 'Take Off', type: 'takeoff', alt: 0 },
-    { lat: 37.7820, lng: -122.4060, label: 'WP 1 — Financial District', type: 'waypoint', alt: 85 },
-    { lat: 37.7900, lng: -122.3950, label: 'WP 2 — Embarcadero', type: 'waypoint', alt: 110 },
-    { lat: 37.8025, lng: -122.4058, label: 'WP 3 — Fisherman\'s Wharf', type: 'waypoint', alt: 95 },
-    { lat: 37.8080, lng: -122.4177, label: 'WP 4 — Ghirardelli Square', type: 'waypoint', alt: 75 },
-    { lat: 37.7990, lng: -122.4310, label: 'WP 5 — Marina', type: 'waypoint', alt: 60 },
-    { lat: 37.7749, lng: -122.4194, label: 'Return to Launch', type: 'rtl', alt: 0 }
-  ],
+  // ── Interstitial & Live Mode State ──
+  _mode: null,               // 'demo' | 'live' | null
+  _selectedDrone: null,       // { id, name, hostname, model } for live
+  _loadedWaypoints: null,     // parsed waypoints from file
+  _ws: null,                  // WebSocket instance
+  _wsReconnectTimer: null,
+  _lastWsPosition: null,
+  _lastWsTime: null,
+  _trailThrottleTime: 0,
+  _liveWaypointRadius: 50,    // metres — mark waypoint as visited
+  _visitedWaypoints: new Set(),
+  _mapCenteredOnLive: false,
+
+  // Active mission waypoints (set by interstitial launch)
+  _missionWaypoints: [..._DEFAULT_WAYPOINTS],
 
   _telemetry: {
     altitude: 0,
@@ -53,6 +69,17 @@ export const DroneView = {
   _getDom() {
     if (this._dom) return this._dom;
     this._dom = {
+      // Interstitial
+      interstitial: document.getElementById('dvInterstitial'),
+      dvContainer: document.getElementById('dvContainer'),
+      dvDroneSelect: document.getElementById('dvDroneSelect'),
+      dvWpSection: document.getElementById('dvInterstitialWpSection'),
+      dvLoadWpBtn: document.getElementById('dvLoadWaypointsBtn'),
+      dvWpFileStatus: document.getElementById('dvWaypointFileStatus'),
+      dvLaunchBtn: document.getElementById('dvLaunchBtn'),
+      demoBadge: document.getElementById('dvDemoBadge'),
+      droneIdLabel: document.getElementById('dvDroneIdLabel'),
+      // Map
       mapEl: document.getElementById('droneviewMap'),
       // Telemetry
       altitude: document.getElementById('dvAltitude'),
@@ -107,6 +134,11 @@ export const DroneView = {
     _navigate = navigate;
     const d = this._getDom();
 
+    // Interstitial events
+    d.dvDroneSelect.addEventListener('change', () => this._onDroneSelectChange());
+    d.dvLoadWpBtn.addEventListener('click', () => this._loadWaypointsFromFileInterstitial());
+    d.dvLaunchBtn.addEventListener('click', () => this._launchDroneView());
+
     d.btnFlightAnalysis.addEventListener('click', () => this._requestFlightAnalysis());
     d.btnAltRoutes.addEventListener('click', () => this._requestAltRoutes());
     d.btnCloseAnalysis.addEventListener('click', () => d.analysisPanel.classList.remove('visible'));
@@ -127,21 +159,13 @@ export const DroneView = {
   },
 
   async onEnter() {
-    if (!this._loadAttempted) {
-      this._loadAttempted = true;
-      const loaded = await loadGoogleMaps();
-      if (loaded) {
-        this._mapsReady = true;
-        this._initMap();
-      }
-    } else if (this._map) {
-      google.maps.event.trigger(this._map, 'resize');
-      if (!this._missionComplete) this._startSimulation();
-    }
+    this._showInterstitial();
+    await this._populateDroneSelect();
   },
 
   onLeave() {
     this._stopSimulation();
+    this._disconnectWebSocket();
   },
 
   /** Called by Theme when theme changes. */
@@ -235,6 +259,9 @@ export const DroneView = {
     this._rebuildWaypointMarkers();
 
     const launch = this._missionWaypoints[0] || { lat: 37.7749, lng: -122.4194 };
+    const droneTitle = this._mode === 'live' && this._selectedDrone
+      ? `${this._selectedDrone.name}${this._selectedDrone.model ? ' — ' + this._selectedDrone.model : ''}`
+      : 'Helios X1 — HLX-0042';
     this._droneMarker = new google.maps.Marker({
       position: { lat: launch.lat, lng: launch.lng },
       map: this._map,
@@ -243,14 +270,26 @@ export const DroneView = {
         scaledSize: new google.maps.Size(40, 40),
         anchor: new google.maps.Point(20, 20)
       },
-      title: 'Helios X1 — HLX-0042',
+      title: droneTitle,
       zIndex: 1000
     });
 
     this._resetTelemetryToMissionStart();
     this._renderWaypointList();
     this._updateTelemetryUI();
-    this._startSimulation();
+
+    // Fit map to waypoints if available
+    if (this._missionWaypoints.length > 1) {
+      const bounds = new google.maps.LatLngBounds();
+      this._missionWaypoints.forEach(wp => bounds.extend({ lat: wp.lat, lng: wp.lng }));
+      this._map.fitBounds(bounds, 80);
+    }
+
+    if (this._mode === 'live') {
+      this._connectWebSocket();
+    } else {
+      this._startSimulation();
+    }
     this._fetchLiveWeather();
   },
 
@@ -291,7 +330,7 @@ export const DroneView = {
   },
 
   _applyMissionWaypointsToMap({ restartSimulation = false } = {}) {
-    if (!this._map || this._missionWaypoints.length < 2) return;
+    if (!this._map) return;
 
     if (this._simInterval) {
       clearInterval(this._simInterval);
@@ -456,9 +495,15 @@ export const DroneView = {
     this._updateWaypointStatuses();
 
     // Store in shared state for Reports
+    const droneName = this._mode === 'live' && this._selectedDrone
+      ? `${this._selectedDrone.name}${this._selectedDrone.model ? ' — ' + this._selectedDrone.model : ''}`
+      : 'Helios X1 — Recon';
+    const droneIdentifier = this._mode === 'live' && this._selectedDrone
+      ? `ID-${this._selectedDrone.id}`
+      : 'HLX-0042';
     state.flightData = {
-      droneModel: 'Helios X1 — Recon',
-      droneId: 'HLX-0042',
+      droneModel: droneName,
+      droneId: droneIdentifier,
       missionStart: new Date(this._missionStartTime).toISOString(),
       missionEnd: new Date().toISOString(),
       durationMs: elapsed,
@@ -499,8 +544,18 @@ export const DroneView = {
   _updateProgress() {
     const d = this._getDom();
     const wps = this._missionWaypoints;
-    const totalSegments = wps.length - 1;
-    const pct = Math.min(100, ((this._simIndex + this._simFraction) / totalSegments) * 100);
+    if (wps.length < 2) {
+      d.progressPct.textContent = '—';
+      d.progressFill.style.width = '0%';
+      return;
+    }
+    let pct;
+    if (this._mode === 'live') {
+      pct = Math.min(100, (this._visitedWaypoints.size / wps.length) * 100);
+    } else {
+      const totalSegments = wps.length - 1;
+      pct = Math.min(100, ((this._simIndex + this._simFraction) / totalSegments) * 100);
+    }
     d.progressPct.textContent = Math.round(pct) + '%';
     d.progressFill.style.width = pct + '%';
   },
@@ -527,20 +582,33 @@ export const DroneView = {
     wps.forEach((wp, i) => {
       const el = document.getElementById(`dvWpStatus${i}`);
       if (!el) return;
-      if (i < this._simIndex) {
-        el.textContent = 'Reached';
-        el.className = 'dv-wp-status reached';
-        el.closest('.dv-wp-item').classList.add('completed');
-        el.closest('.dv-wp-item').classList.remove('active');
-      } else if (i === this._simIndex) {
-        el.textContent = 'Active';
-        el.className = 'dv-wp-status next';
-        el.closest('.dv-wp-item').classList.remove('completed');
-        el.closest('.dv-wp-item').classList.add('active');
+      if (this._mode === 'live') {
+        if (this._visitedWaypoints.has(i)) {
+          el.textContent = 'Reached';
+          el.className = 'dv-wp-status reached';
+          el.closest('.dv-wp-item').classList.add('completed');
+          el.closest('.dv-wp-item').classList.remove('active');
+        } else {
+          el.textContent = 'Pending';
+          el.className = 'dv-wp-status pending';
+          el.closest('.dv-wp-item').classList.remove('completed', 'active');
+        }
       } else {
-        el.textContent = 'Pending';
-        el.className = 'dv-wp-status pending';
-        el.closest('.dv-wp-item').classList.remove('completed', 'active');
+        if (i < this._simIndex) {
+          el.textContent = 'Reached';
+          el.className = 'dv-wp-status reached';
+          el.closest('.dv-wp-item').classList.add('completed');
+          el.closest('.dv-wp-item').classList.remove('active');
+        } else if (i === this._simIndex) {
+          el.textContent = 'Active';
+          el.className = 'dv-wp-status next';
+          el.closest('.dv-wp-item').classList.remove('completed');
+          el.closest('.dv-wp-item').classList.add('active');
+        } else {
+          el.textContent = 'Pending';
+          el.className = 'dv-wp-status pending';
+          el.closest('.dv-wp-item').classList.remove('completed', 'active');
+        }
       }
     });
   },
@@ -548,7 +616,8 @@ export const DroneView = {
   // ── Live Weather ──
   async _fetchLiveWeather() {
     try {
-      const wp = this._missionWaypoints[0];
+      const wp = this._missionWaypoints[0] || { lat: this._telemetry.lat, lng: this._telemetry.lng };
+      if (!wp.lat || !wp.lng) return;
       const today = new Date().toISOString().split('T')[0];
       const url = `https://api.open-meteo.com/v1/forecast?latitude=${wp.lat}&longitude=${wp.lng}`
         + `&hourly=temperature_2m,windspeed_10m,winddirection_10m,precipitation_probability,visibility,weathercode`
@@ -832,6 +901,372 @@ RULES:
       this._renderWaypointList();
     }
     this._dismissAltRoutes();
+  },
+
+  // ══════════════════════════════════════════
+  //  INTERSTITIAL (Drone Selection Screen)
+  // ══════════════════════════════════════════
+
+  _showInterstitial() {
+    const d = this._getDom();
+    d.interstitial.style.display = '';
+    d.dvContainer.style.display = 'none';
+    // Reset state for fresh selection
+    this._loadedWaypoints = null;
+    this._mode = null;
+    this._mapCenteredOnLive = false;
+    // Reset waypoint file status
+    d.dvWpFileStatus.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14"><path d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z"/></svg><span>Load a .waypoints file to display the mission route on the map</span>';
+    d.dvWpFileStatus.classList.remove('loaded');
+    d.dvLoadWpBtn.classList.remove('loaded');
+    d.dvLoadWpBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="16" height="16"><path d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/></svg> Load Waypoints File';
+  },
+
+  _hideInterstitial() {
+    const d = this._getDom();
+    d.interstitial.style.display = 'none';
+    d.dvContainer.style.display = '';
+  },
+
+  async _populateDroneSelect() {
+    const d = this._getDom();
+    const select = d.dvDroneSelect;
+    // Keep demo option, remove dynamic ones
+    select.innerHTML = '<option value="demo">Demo Drone (Simulated Data)</option>';
+
+    try {
+      const drones = await window.helios.fleetGetAll();
+      if (drones.length > 0) {
+        const group = document.createElement('optgroup');
+        group.label = 'Your Fleet';
+        drones.forEach(drone => {
+          const opt = document.createElement('option');
+          opt.value = String(drone.id);
+          opt.textContent = `${drone.name}${drone.model ? ' — ' + drone.model : ''}`;
+          opt.dataset.hostname = drone.hostname;
+          opt.dataset.droneName = drone.name;
+          opt.dataset.droneModel = drone.model || '';
+          opt.dataset.droneType = drone.drone_type || '';
+          group.appendChild(opt);
+        });
+        select.appendChild(group);
+      }
+    } catch (err) {
+      console.warn('Failed to load fleet drones for drone view:', err);
+    }
+
+    // Trigger change to set initial state
+    this._onDroneSelectChange();
+  },
+
+  _onDroneSelectChange() {
+    const d = this._getDom();
+    const isDemo = d.dvDroneSelect.value === 'demo';
+    d.dvWpSection.style.display = isDemo ? 'none' : '';
+  },
+
+  // ── Waypoint File Loading (Interstitial) ──
+
+  async _loadWaypointsFromFileInterstitial() {
+    try {
+      const result = await window.helios.openFile({
+        title: 'Load Waypoints',
+        filters: [
+          { name: 'Waypoint Files', extensions: ['waypoints'] },
+          { name: 'All Files', extensions: ['*'] }
+        ]
+      });
+      if (!result.success) return;
+
+      const waypoints = this._parseWaypointFile(result.content);
+      if (!waypoints || waypoints.length === 0) {
+        this._showInterstitialError('No valid waypoints found in file.');
+        return;
+      }
+
+      this._loadedWaypoints = waypoints;
+
+      const d = this._getDom();
+      d.dvLoadWpBtn.classList.add('loaded');
+      d.dvLoadWpBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M4.5 12.75l6 6 9-13.5"/></svg> ${waypoints.length} Waypoints Loaded`;
+      d.dvWpFileStatus.classList.add('loaded');
+      d.dvWpFileStatus.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg><span>Ready — ${waypoints.length} waypoints from ${result.path.split('/').pop()}</span>`;
+    } catch (err) {
+      console.error('Load waypoints failed:', err);
+      this._showInterstitialError('Failed to load waypoint file.');
+    }
+  },
+
+  _parseWaypointFile(content) {
+    const lines = content.trim().split(/\r?\n/).filter(l => l.trim().length > 0);
+    if (lines.length < 2) return null;
+    const header = lines[0].trim();
+    if (!header.startsWith('QGC WPL')) {
+      this._showInterstitialError('Invalid file: expected QGC WPL format header.');
+      return null;
+    }
+
+    const waypoints = [];
+    for (let i = 1; i < lines.length; i++) {
+      const parts = lines[i].trim().split(/\t+/);
+      if (parts.length < 12) continue;
+      const cmd = parseInt(parts[3]);
+      const lat = parseFloat(parts[8]);
+      const lng = parseFloat(parts[9]);
+      const alt = parseFloat(parts[10]);
+
+      if (cmd === 20) { // RTL
+        if (lat === 0 && lng === 0 && waypoints.length > 0) {
+          waypoints.push({ lat: waypoints[0].lat, lng: waypoints[0].lng, alt: alt || 0 });
+        } else if (lat !== 0 || lng !== 0) {
+          waypoints.push({ lat, lng, alt: alt || 0 });
+        }
+        continue;
+      }
+      if (cmd === 22) { // Takeoff
+        if (lat === 0 && lng === 0) continue;
+        waypoints.push({ lat, lng, alt });
+        continue;
+      }
+      if (cmd === 16) { // NAV_WAYPOINT
+        if (lat === 0 && lng === 0) continue;
+        waypoints.push({ lat, lng, alt });
+      }
+    }
+    return waypoints;
+  },
+
+  _showInterstitialError(msg) {
+    const d = this._getDom();
+    d.dvWpFileStatus.classList.remove('loaded');
+    d.dvWpFileStatus.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14"><path d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"/></svg><span style="color:#ef4444;">${msg}</span>`;
+  },
+
+  // ── Launch Drone View ──
+
+  async _launchDroneView() {
+    const d = this._getDom();
+    const isDemo = d.dvDroneSelect.value === 'demo';
+
+    this._mode = isDemo ? 'demo' : 'live';
+    this._missionComplete = false;
+    this._visitedWaypoints = new Set();
+    this._flightLog = [];
+    this._mapCenteredOnLive = false;
+
+    if (!isDemo) {
+      const opt = d.dvDroneSelect.options[d.dvDroneSelect.selectedIndex];
+      this._selectedDrone = {
+        id: parseInt(d.dvDroneSelect.value, 10),
+        name: opt.dataset.droneName || opt.textContent,
+        hostname: opt.dataset.hostname,
+        model: opt.dataset.droneModel || ''
+      };
+    } else {
+      this._selectedDrone = null;
+    }
+
+    // Set waypoints
+    if (isDemo) {
+      this._missionWaypoints = _DEFAULT_WAYPOINTS.map(w => ({ ...w }));
+    } else if (this._loadedWaypoints && this._loadedWaypoints.length >= 2) {
+      this._missionWaypoints = this._normalizeMissionWaypoints(this._loadedWaypoints);
+    } else {
+      this._missionWaypoints = [];
+    }
+
+    this._resetTelemetryToMissionStart();
+    this._hideInterstitial();
+    this._updateLiveBadge();
+
+    if (!this._loadAttempted) {
+      this._loadAttempted = true;
+      const loaded = await loadGoogleMaps();
+      if (loaded) {
+        this._mapsReady = true;
+        this._initMap();
+      }
+    } else if (this._map) {
+      google.maps.event.trigger(this._map, 'resize');
+      this._applyMissionWaypointsToMap({ restartSimulation: this._mode === 'demo' });
+      if (this._mode === 'live') {
+        this._connectWebSocket();
+      }
+    }
+  },
+
+  _updateLiveBadge() {
+    const d = this._getDom();
+    if (this._mode === 'live' && this._selectedDrone) {
+      d.demoBadge.classList.add('hidden');
+      d.droneIdLabel.textContent = `${this._selectedDrone.name}${this._selectedDrone.model ? ' — ' + this._selectedDrone.model : ''}`;
+    } else {
+      d.demoBadge.classList.remove('hidden');
+      d.droneIdLabel.textContent = 'Helios X1 — HLX-0042';
+    }
+  },
+
+  // ══════════════════════════════════════════
+  //  LIVE TELEMETRY (WebSocket)
+  // ══════════════════════════════════════════
+
+  _connectWebSocket() {
+    if (!this._selectedDrone?.hostname) return;
+
+    this._disconnectWebSocket();
+
+    const url = `ws://${this._selectedDrone.hostname}:5000/ws/telemetry`;
+    console.log(`[DroneView] Connecting to ${url}...`);
+
+    try {
+      this._ws = new WebSocket(url);
+
+      this._ws.onopen = () => {
+        console.log('[DroneView] WebSocket connected');
+        // Subscribe to all telemetry
+        this._ws.send(JSON.stringify({ subscribe: ['all'] }));
+        this._lastWsPosition = null;
+        this._lastWsTime = null;
+        this._visitedWaypoints = new Set();
+        this._missionStartTime = Date.now();
+        this._flightLog = [
+          { time: new Date().toISOString(), event: 'launch', detail: 'Live telemetry stream started' }
+        ];
+        if (this._trailPolyline) this._trailPolyline.setPath([]);
+      };
+
+      this._ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          this._onWsMessage(data);
+        } catch (e) {
+          console.warn('[DroneView] Failed to parse WS message:', e);
+        }
+      };
+
+      this._ws.onclose = (event) => {
+        console.log('[DroneView] WebSocket closed:', event.code, event.reason);
+        this._ws = null;
+        // Auto-reconnect if still in live mode and page is active
+        if (this._mode === 'live' && state.activePage === 'droneview') {
+          this._wsReconnectTimer = setTimeout(() => this._connectWebSocket(), 3000);
+        }
+      };
+
+      this._ws.onerror = (error) => {
+        console.error('[DroneView] WebSocket error:', error);
+        this._showError(`WebSocket connection failed to ${this._selectedDrone.hostname}:5000. Make sure the Helios SBC Service is running.`);
+      };
+    } catch (err) {
+      console.error('[DroneView] Failed to create WebSocket:', err);
+      this._showError(`Could not connect to drone: ${err.message}`);
+    }
+  },
+
+  _disconnectWebSocket() {
+    if (this._wsReconnectTimer) {
+      clearTimeout(this._wsReconnectTimer);
+      this._wsReconnectTimer = null;
+    }
+    if (this._ws) {
+      this._ws.onclose = null; // prevent auto-reconnect
+      this._ws.close();
+      this._ws = null;
+    }
+  },
+
+  _onWsMessage(data) {
+    const now = Date.now();
+
+    // Extract position telemetry
+    if (data.position) {
+      const lat = data.position.latitude_deg;
+      const lng = data.position.longitude_deg;
+      const alt = Math.round(data.position.relative_altitude_m || 0);
+
+      // Calculate speed from position deltas
+      let speed = 0;
+      if (this._lastWsPosition && this._lastWsTime) {
+        const dt = (now - this._lastWsTime) / 1000;
+        if (dt > 0) {
+          const dist = haversine(this._lastWsPosition.lat, this._lastWsPosition.lng, lat, lng);
+          speed = (dist / dt) * 3.6; // m/s to km/h
+          // Filter out GPS noise / teleportation spikes
+          if (speed > 200) speed = parseFloat(this._telemetry.speed) || 0;
+        }
+      }
+
+      this._telemetry.lat = lat;
+      this._telemetry.lng = lng;
+      this._telemetry.altitude = alt;
+      this._telemetry.speed = speed.toFixed(1);
+
+      this._lastWsPosition = { lat, lng };
+      this._lastWsTime = now;
+
+      // Move drone marker
+      if (this._droneMarker) {
+        this._droneMarker.setPosition({ lat, lng });
+      }
+
+      // Add to trail polyline (throttled to every second)
+      if (this._trailPolyline && now - this._trailThrottleTime > 1000) {
+        const path = this._trailPolyline.getPath();
+        path.push(new google.maps.LatLng(lat, lng));
+        this._trailThrottleTime = now;
+      }
+
+      // Center map on first live position
+      if (!this._mapCenteredOnLive && this._map) {
+        this._map.setCenter({ lat, lng });
+        if (this._missionWaypoints.length === 0) {
+          this._map.setZoom(16);
+        }
+        this._mapCenteredOnLive = true;
+      }
+
+      // Pan map every ~5 seconds
+      if (this._map && now % 5000 < 200) {
+        this._map.panTo({ lat, lng });
+      }
+
+      // Check waypoint proximity
+      this._checkWaypointProximity(lat, lng);
+    }
+
+    // Extract attitude
+    if (data.attitude) {
+      this._telemetry.heading = Math.round(data.attitude.yaw_deg || 0);
+    }
+
+    // Extract battery (remaining_percent is 0–1 from SBC)
+    if (data.battery) {
+      const pct = data.battery.remaining_percent;
+      this._telemetry.battery = pct > 1 ? Math.round(pct) : Math.round(pct * 100);
+    }
+
+    // Satellites not provided by SBC service
+    this._telemetry.satellites = '—';
+
+    // Update UI
+    this._updateTelemetryUI();
+    this._updateProgress();
+    this._updateWaypointStatuses();
+  },
+
+  _checkWaypointProximity(lat, lng) {
+    this._missionWaypoints.forEach((wp, i) => {
+      if (this._visitedWaypoints.has(i)) return;
+      const dist = haversine(lat, lng, wp.lat, wp.lng);
+      if (dist <= this._liveWaypointRadius) {
+        this._visitedWaypoints.add(i);
+        this._flightLog.push({
+          time: new Date().toISOString(),
+          event: wp.type === 'rtl' ? 'land' : 'waypoint',
+          detail: `${wp.label} reached (live)`
+        });
+      }
+    });
   },
 
   // ── Error Toast ──
