@@ -22,6 +22,8 @@ export const Missions = {
 
   // DOM cache
   _dom: null,
+  _currentMapType: 'roadmap',
+  _is3DMode: false,
   _getDom() {
     if (this._dom) return this._dom;
     this._dom = {
@@ -65,7 +67,10 @@ export const Missions = {
       btnFpDownload: document.getElementById('btnFpDownload'),
       fpCopyLabel: document.getElementById('fpCopyLabel'),
       // Load waypoints
-      btnLoadWaypoints: document.getElementById('btnLoadWaypoints')
+      btnLoadWaypoints: document.getElementById('btnLoadWaypoints'),
+      // Map controls
+      mapTypeSelector: document.getElementById('mapTypeSelector'),
+      btn3DToggle: document.getElementById('btn3DToggle')
     };
     return this._dom;
   },
@@ -104,6 +109,12 @@ export const Missions = {
 
     // Load waypoints from file
     d.btnLoadWaypoints.addEventListener('click', () => this._loadWaypointsFromFile());
+
+    // Map visualization controls
+    d.mapTypeSelector?.querySelectorAll('.map-type-btn').forEach(btn => {
+      btn.addEventListener('click', () => this._setMapType(btn.dataset.mapType));
+    });
+    d.btn3DToggle?.addEventListener('click', () => this._toggle3DView());
   },
 
   async onEnter() {
@@ -209,6 +220,9 @@ export const Missions = {
     this._map.addListener('click', (e) => {
       this._addWaypoint(e.latLng.lat(), e.latLng.lng());
     });
+
+    // Set initial map type
+    this._setMapType('roadmap');
   },
 
   // ── Waypoint Management ──
@@ -429,6 +443,7 @@ export const Missions = {
     const takeoffDate = document.getElementById('takeoffDate').value;
     const loadWeight = document.getElementById('loadWeight').value;
     const missionDescription = document.getElementById('missionDescription').value;
+    const optimizationMode = document.getElementById('optimizationMode')?.value || 'standard';
     const waypoints = this._markers.map(m => {
       const p = m.getPosition();
       return { lat: p.lat(), lng: p.lng(), type: m._wpType, label: m.getTitle() };
@@ -440,7 +455,8 @@ export const Missions = {
       loadWeight: parseFloat(loadWeight),
       weightUnit: this._unit,
       missionDescription, waypoints,
-      totalDistance: this._computeDistance()
+      totalDistance: this._computeDistance(),
+      optimizationMode
     };
 
     this._clearAiRoute();
@@ -471,6 +487,8 @@ export const Missions = {
         if (aiResult.value.pilotBriefing) {
           this._showBriefingPanel(aiResult.value.pilotBriefing);
         }
+        // Switch to terrain view to show elevation after planning
+        this._setMapType('terrain');
         d.aiControlBar.classList.add('visible');
       } else {
         const errMsg = aiResult.reason?.message || 'Failed to get AI analysis. Check your GEMINI_API_KEY.';
@@ -502,7 +520,60 @@ export const Missions = {
     const specs = typeDefaults[mission.droneType] || typeDefaults['quadcopter'];
     const droneLine = `${mission.droneName}${mission.droneModelName ? ' (' + mission.droneModelName + ')' : ''} [${mission.droneType}]`;
 
-    const prompt = `You are an expert eVTOL drone mission planner. Analyze this mission and provide an optimized flight plan.
+    // Build optimization-specific instructions
+    const optimizationModes = {
+      standard: {
+        title: 'Balanced Route Optimization',
+        rules: `- Keep the same number of waypoints as the user provided
+- Optimize altitudes based on the drone specs, terrain, and mission type
+- Balance between flight time, safety, and energy efficiency
+- The first waypoint must be type "takeoff" and the last must be type "rtl"
+- Altitudes should be between 30m and the drone's max altitude`
+      },
+      shortest: {
+        title: 'Shortest Path Optimization',
+        rules: `- PRIORITIZE minimizing total flight distance and time
+- You must reduce waypoint count especially if intermediate points are unnecessary for direct routing
+- Optimize for straight-line paths where safe and practical
+- The first waypoint must be type "takeoff" and the last must be type "rtl"
+- Altitudes should favor efficiency (higher altitudes for longer segments to reduce drag)
+- Avoid unnecessary altitude changes that would increase flight time`
+      },
+      safest: {
+        title: 'Safest Route Optimization',
+        rules: `- PRIORITIZE safety and risk mitigation above all else
+- Keep the same or more waypoints to ensure controlled flight path
+- Recommend lower altitudes (40-60m) for better control and emergency landing options
+- Avoid high-risk areas (dense urban zones, water bodies, steep terrain)
+- Add buffer waypoints near potential hazards
+- The first waypoint must be type "takeoff" and the last must be type "rtl"
+- Emphasize conservative flight parameters`
+      },
+      energy: {
+        title: 'Energy Efficient Route Optimization',
+        rules: `- PRIORITIZE minimizing battery consumption and extending flight time
+- Optimize altitudes to minimize energy use (generally 60-80m for best efficiency)
+- Minimize altitude changes and aggressive maneuvers
+- Consider wind direction for energy savings (tailwind on longer segments)
+- Keep the same number of waypoints but optimize their positions for smooth, efficient flight
+- The first waypoint must be type "takeoff" and the last must be type "rtl"
+- Recommend lower cruise speeds for energy conservation`
+      },
+      scenic: {
+        title: 'Scenic Route Optimization',
+        rules: `- PRIORITIZE interesting viewpoints and varied perspectives
+- Add waypoints to capture unique angles and terrain features
+- Vary altitudes (40m-100m) for diverse camera perspectives
+- Consider landmarks, natural features, and scenic overlooks
+- The first waypoint must be type "takeoff" and the last must be type "rtl"
+- Balance scenic interest with reasonable flight time
+- Note optimal camera angles and points of interest in waypoint labels`
+      }
+    };
+
+    const modeConfig = optimizationModes[mission.optimizationMode] || optimizationModes.standard;
+
+    const prompt = `You are an expert eVTOL drone mission planner. Analyze this mission and provide an optimized flight plan using ${modeConfig.title}.
 
 MISSION DATA:
 - Drone: ${droneLine} (est. max altitude: ${specs.maxAltitude}m, max speed: ${specs.maxSpeed}km/h, max flight time: ${specs.maxFlightTime}min, max payload: ${specs.maxPayload}kg)
@@ -510,6 +581,7 @@ MISSION DATA:
 - Payload weight: ${mission.loadWeight} ${mission.weightUnit}
 - Mission description: ${mission.missionDescription || 'General mission'}
 - Total route distance: ${(mission.totalDistance / 1000).toFixed(2)} km
+- Optimization Mode: ${modeConfig.title}
 
 WAYPOINTS (user-defined):
 ${mission.waypoints.map((wp, i) => `  ${i + 1}. [${wp.type}] ${wp.label} — lat: ${wp.lat.toFixed(6)}, lng: ${wp.lng.toFixed(6)}`).join('\n')}
@@ -521,7 +593,7 @@ Return a JSON response with EXACTLY this structure (no markdown, no code fences,
     { "lat": <number>, "lng": <number>, "altitude_m": <recommended altitude in meters>, "label": "<descriptive label>", "type": "<takeoff|waypoint|rtl>" }
   ],
   "pilotBriefing": {
-    "summary": "<2-3 sentence mission overview>",
+    "summary": "<2-3 sentence mission overview focusing on ${mission.optimizationMode} optimization>",
     "safetyConsiderations": ["<safety item 1>", "<safety item 2>"],
     "recommendations": ["<recommendation 1>", "<recommendation 2>"],
     "estimatedFlightTime": "<e.g. 12 min>",
@@ -530,14 +602,12 @@ Return a JSON response with EXACTLY this structure (no markdown, no code fences,
   }
 }
 
-RULES:
-- Keep the same number of waypoints as the user provided
-- Optimize altitudes based on the drone specs, terrain, and mission type
-- The first waypoint must be type "takeoff" and the last must be type "rtl"
-- Altitudes should be between 30m and the drone's max altitude
+OPTIMIZATION RULES (${modeConfig.title}):
+${modeConfig.rules}
 - Provide practical safety considerations and recommendations
 - Consider payload weight impact on flight time and performance
-- Be concise but thorough in the briefing`;
+- Be concise but thorough in the briefing
+- Explain how your route achieves the ${mission.optimizationMode} optimization goal`;
 
     return callGemini(apiKey, prompt);
   },
@@ -683,6 +753,36 @@ RULES:
     this._hideAiPanels();
     this._lastAiResult = null;
     this._submitMission();
+  },
+
+  // ── Map Visualization Controls ──
+  _setMapType(type) {
+    if (!this._map) return;
+    this._currentMapType = type;
+    this._map.setMapTypeId(google.maps.MapTypeId[type.toUpperCase()]);
+    
+    // Update button states
+    const d = this._getDom();
+    d.mapTypeSelector?.querySelectorAll('.map-type-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.mapType === type);
+    });
+  },
+
+  _toggle3DView() {
+    if (!this._map) return;
+    const d = this._getDom();
+    this._is3DMode = !this._is3DMode;
+    
+    if (this._is3DMode) {
+      // Enable tilt/3D view
+      this._map.setTilt(45);
+      this._map.setZoom(Math.min(this._map.getZoom() + 1, 20));
+      d.btn3DToggle?.classList.add('active');
+    } else {
+      // Disable tilt, return to 2D
+      this._map.setTilt(0);
+      d.btn3DToggle?.classList.remove('active');
+    }
   },
 
   _showErrorToast(message) {

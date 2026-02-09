@@ -199,6 +199,28 @@
               <textarea id="missionDescription" class="form-input" placeholder="Enter mission details, objectives, and notes..." rows="3"></textarea>
             </div>
 
+            <!-- Route Optimization Mode -->
+            <div class="form-group">
+              <label class="form-label" for="optimizationMode">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14">
+                  <path d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/>
+                </svg>
+                Optimization Mode
+              </label>
+              <div class="select-wrapper">
+                <select id="optimizationMode" class="form-select">
+                  <option value="standard">Standard (Balanced)</option>
+                  <option value="shortest">Shortest Path</option>
+                  <option value="safest">Safest Route</option>
+                  <option value="energy">Energy Efficient</option>
+                  <option value="scenic">Scenic Route</option>
+                </select>
+                <svg class="select-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                  <path d="M6 9l6 6 6-6"/>
+                </svg>
+              </div>
+            </div>
+
             <!-- Mission Summary (populated by waypoints) -->
             <div class="form-group">
               <label class="form-label">
@@ -262,6 +284,39 @@
             </svg>
           </button>
 
+          <!-- Map Type Selector (top-right) -->
+          <div class="map-type-selector" id="mapTypeSelector">
+            <button class="map-type-btn active" data-map-type="roadmap" title="Roadmap">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="16" height="16">
+                <path d="M9 6.75V15m6-6v8.25m.503 3.498l4.875-2.437c.381-.19.622-.58.622-1.006V4.82c0-.836-.88-1.38-1.628-1.006l-3.869 1.934c-.317.159-.69.159-1.006 0L9.503 3.252a1.125 1.125 0 00-1.006 0L3.622 5.689C3.24 5.88 3 6.27 3 6.695V19.18c0 .836.88 1.38 1.628 1.006l3.869-1.934c.317-.159.69-.159 1.006 0l4.994 2.497c.317.158.69.158 1.006 0z"/>
+              </svg>
+            </button>
+            <button class="map-type-btn" data-map-type="terrain" title="Terrain">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="16" height="16">
+                <path d="M2.25 7.125C2.25 6.504 2.754 6 3.375 6h6c.621 0 1.125.504 1.125 1.125v3.75c0 .621-.504 1.125-1.125 1.125h-6a1.125 1.125 0 01-1.125-1.125v-3.75zM14.25 8.625c0-.621.504-1.125 1.125-1.125h5.25c.621 0 1.125.504 1.125 1.125v8.25c0 .621-.504 1.125-1.125 1.125h-5.25a1.125 1.125 0 01-1.125-1.125v-8.25zM3.75 16.125c0-.621.504-1.125 1.125-1.125h5.25c.621 0 1.125.504 1.125 1.125v2.25c0 .621-.504 1.125-1.125 1.125h-5.25a1.125 1.125 0 01-1.125-1.125v-2.25z"/>
+              </svg>
+            </button>
+            <button class="map-type-btn" data-map-type="satellite" title="Satellite">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="16" height="16">
+                <path d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"/>
+                <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+              </svg>
+            </button>
+            <button class="map-type-btn" data-map-type="hybrid" title="Hybrid">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="16" height="16">
+                <path d="M6.429 9.75L2.25 12l4.179 2.25m0-4.5l5.571 3 5.571-3m-11.142 0L2.25 7.5 12 2.25l9.75 5.25-4.179 2.25m0 0L21.75 12l-4.179 2.25m0 0l4.179 2.25L12 21.75 2.25 16.5l4.179-2.25m11.142 0l-5.571 3-5.571-3"/>
+              </svg>
+            </button>
+          </div>
+
+          <!-- 3D Toggle Button (below map type selector) -->
+          <button class="btn-3d-toggle" id="btn3DToggle" title="Toggle 3D view">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="16" height="16">
+              <path d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9"/>
+            </svg>
+            <span>3D</span>
+          </button>
+
           <!-- Waypoint list overlay -->
           <div class="waypoint-bar" id="waypointBar">
             <div class="waypoint-bar-header">
@@ -307,7 +362,7 @@
               </div>
               <div class="ai-legend">
                 <span class="legend-item"><span class="legend-dot legend-user"></span>Your Route</span>
-                <span class="legend-item"><span class="legend-dot legend-ai"></span>AI Optimized</span>
+                <span class="legend-item"><span class="legend-dot legend-ai"></span>Optimized</span>
               </div>
             </div>
             <div class="ai-control-actions">

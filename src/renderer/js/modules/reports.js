@@ -388,6 +388,7 @@ Return JSON only (no markdown, no fences):
   "gradeTitle": "<short title>",
   "gradeDescription": "<1 sentence>",
   "overallSummary": "<3-4 sentence assessment>",
+  "reportSummaryInWords": "<120-180 word plain-language summary of the full report>",
   "strengths": ["<str1>", "<str2>", "<str3>"],
   "areasForImprovement": ["<imp1>", "<imp2>"],
   "safetyEvaluation": { "rating": "<excellent|good|acceptable|concerning|poor>", "notes": ["<n1>", "<n2>"] },
@@ -419,6 +420,12 @@ Return JSON only (no markdown, no fences):
           </div>
         </div>
         <p class="rpt-ai-summary">${data.overallSummary || ''}</p>
+        ${(data.reportSummaryInWords || data.overallSummary) ? `
+          <div class="rpt-ai-block">
+            <h4 class="rpt-ai-block-title">${RptIcons.log} Report Summary</h4>
+            <p class="rpt-ai-summary">${data.reportSummaryInWords || data.overallSummary}</p>
+          </div>
+        ` : ''}
         <div class="rpt-ai-meta">
           <span class="rpt-ai-meta-tag">Efficiency: ${data.missionEfficiency || '\u2014'}</span>
           <span class="rpt-ai-meta-tag">Compliance: ${data.complianceStatus || '\u2014'}</span>
