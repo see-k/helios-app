@@ -84,7 +84,6 @@ export const DroneView = {
       altitude: document.getElementById('dvAltitude'),
       speed: document.getElementById('dvSpeed'),
       heading: document.getElementById('dvHeading'),
-      satellites: document.getElementById('dvSatellites'),
       battery: document.getElementById('dvBattery'),
       batteryFill: document.getElementById('dvBatteryFill'),
       lat: document.getElementById('dvLat'),
@@ -229,7 +228,7 @@ export const DroneView = {
       fleetId: fleetId || null,
       color,
       waypoints: waypoints || [],
-      telemetry: { altitude: 0, speed: 0, heading: 0, battery: 100, satellites: 14, lat: 0, lng: 0 },
+      telemetry: { altitude: 0, speed: 0, heading: 0, battery: 100, lat: 0, lng: 0 },
       // Simulation state
       simInterval: null,
       simIndex: 0,
@@ -897,14 +896,12 @@ export const DroneView = {
       const totalSteps = (wps.length - 1) * stepsPerSegment;
       const currentStep = entry.simIndex * stepsPerSegment + entry.simFraction * stepsPerSegment;
       const batt = Math.max(8, 100 - (currentStep / totalSteps) * 85);
-      const sats = 12 + Math.round(Math.sin(Date.now() / 5000) * 3);
 
       entry.telemetry = {
         altitude: Math.round(alt),
         speed: baseSpeed.toFixed(1),
         heading: Math.round(hdg),
         battery: Math.round(batt),
-        satellites: sats,
         lat, lng
       };
 
@@ -981,7 +978,6 @@ export const DroneView = {
       maxAltitude: Math.max(...wps.map(w => w.alt)),
       avgSpeed: +(42 + Math.random() * 6).toFixed(1),
       maxSpeed: +(48 + Math.random() * 8).toFixed(1),
-      satellites: entry.telemetry.satellites,
       weatherSummary: this._getDom().weatherCondition?.textContent || 'Unknown',
       flightLog: [...entry.flightLog],
       waypoints: wps.map(w => ({ ...w })),
@@ -1108,8 +1104,6 @@ export const DroneView = {
       entry.telemetry.battery = pct > 1 ? Math.round(pct) : Math.round(pct * 100);
     }
 
-    entry.telemetry.satellites = '—';
-
     // Only update panel if active
     if (entry.id === this._activeDroneId) {
       this._updateTelemetryUI(entry);
@@ -1161,7 +1155,6 @@ export const DroneView = {
     d.altitude.textContent = t.altitude;
     d.speed.textContent = t.speed;
     d.heading.textContent = Math.round(t.heading) + '°';
-    d.satellites.textContent = t.satellites;
     d.battery.textContent = Math.round(t.battery) + '%';
     d.lat.textContent = typeof t.lat === 'number' ? t.lat.toFixed(5) : '—';
     d.lng.textContent = typeof t.lng === 'number' ? t.lng.toFixed(5) : '—';
@@ -1341,7 +1334,6 @@ LIVE TELEMETRY:
 - Ground Speed: ${t.speed} km/h
 - Heading: ${t.heading}°
 - Battery: ${Math.round(t.battery)}%
-- GPS Satellites: ${t.satellites}
 - Mission Progress: ${completedPct}%
 ${entry.mode === 'demo' ? `- Current Waypoint Index: ${entry.simIndex + 1} of ${wps.length}` : ''}
 
@@ -1638,7 +1630,6 @@ RULES:
         maxAltitude: maxAlt,
         avgSpeed,
         maxSpeed,
-        satellites: t.satellites || 0,
         weatherSummary: d.weatherCondition?.textContent || 'Unknown',
         flightLog: [...(entry.flightLog || [])],
         waypoints: wps.map(w => ({ ...w })),

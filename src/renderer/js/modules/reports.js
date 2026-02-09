@@ -152,7 +152,6 @@ export const Reports = {
               <div class="rpt-perf-row"><div class="rpt-perf-label-row"><span class="rpt-perf-label">${RptIcons.gauge} Flight Efficiency</span><span class="rpt-perf-value">${efficiencyPct}%</span></div><div class="rpt-perf-bar-track"><div class="rpt-perf-bar-fill" style="width:${efficiencyPct}%"></div></div></div>
               <div class="rpt-perf-row"><div class="rpt-perf-label-row"><span class="rpt-perf-label">${RptIcons.battery} Battery Efficiency</span><span class="rpt-perf-value">${fd.batteryEnd}% left</span></div><div class="rpt-perf-bar-track"><div class="rpt-perf-bar-fill" style="width:${fd.batteryEnd}%"></div></div></div>
               <div class="rpt-perf-row"><div class="rpt-perf-label-row"><span class="rpt-perf-label">${RptIcons.sat} GPS Accuracy</span><span class="rpt-perf-value">${gpsAccuracy}m CEP</span></div><div class="rpt-perf-bar-track"><div class="rpt-perf-bar-fill muted" style="width:${Math.max(20, 100 - parseFloat(gpsAccuracy) * 30)}%"></div></div></div>
-              <div class="rpt-perf-row"><div class="rpt-perf-label-row"><span class="rpt-perf-label">${RptIcons.signal} Signal Strength</span><span class="rpt-perf-value">${fd.satellites} sats</span></div><div class="rpt-perf-bar-track"><div class="rpt-perf-bar-fill muted" style="width:${Math.min(100, fd.satellites * 7)}%"></div></div></div>
               <div class="rpt-perf-row"><div class="rpt-perf-label-row"><span class="rpt-perf-label">${RptIcons.target} Route Adherence</span><span class="rpt-perf-value">100%</span></div><div class="rpt-perf-bar-track"><div class="rpt-perf-bar-fill" style="width:100%"></div></div></div>
             </div>
           </div>
@@ -378,7 +377,6 @@ FLIGHT DATA:
 - Avg Speed: ${fd.avgSpeed} km/h, Max: ${fd.maxSpeed} km/h
 - Max Altitude: ${fd.maxAltitude}m
 - Waypoints: ${fd.waypointsVisited} visited
-- Satellites: ${fd.satellites}
 - Weather: ${fd.weatherSummary}
 
 FLIGHT LOG:
