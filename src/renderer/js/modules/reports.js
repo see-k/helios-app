@@ -403,39 +403,75 @@ Return JSON only (no markdown, no fences):
       this._aiResult = result;
       const aiBody = d.container.querySelector('#rptAiBody');
       if (aiBody) aiBody.innerHTML = this._renderAiAssessment(result);
+      if (btn) btn.classList.remove('loading');
     } catch (err) {
       if (btn) btn.classList.remove('loading');
       this._showAssessmentError(err.message);
     }
   },
 
+  _normalizeAssessment(data) {
+    const safe = data && typeof data === 'object' ? data : {};
+    console.log('Raw AI assessment result:', safe);
+    const safety = (safe.safetyEvaluation && typeof safe.safetyEvaluation === 'object') ? safe.safetyEvaluation : {};
+    return {
+      ...safe,
+      overallSummary: safe.overallSummary || safe.summary || safe.assessmentSummary || '',
+      reportSummaryInWords: safe.reportSummaryInWords || safe.summaryInWords || safe.reportSummary || safe.fullSummary || '',
+      strengths: Array.isArray(safe.strengths) ? safe.strengths : [],
+      areasForImprovement: Array.isArray(safe.areasForImprovement) ? safe.areasForImprovement : [],
+      recommendations: Array.isArray(safe.recommendations) ? safe.recommendations : [],
+      safetyEvaluation: {
+        ...safety,
+        notes: Array.isArray(safety.notes) ? safety.notes : []
+      }
+    };
+  },
+
+  _escapeHtml(value) {
+    return String(value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  },
+
   _renderAiAssessment(data) {
+    const normalized = this._normalizeAssessment(data);
+    const esc = (value) => this._escapeHtml(value);
+    const overallSummary = normalized.overallSummary || '';
+    const reportSummary = normalized.reportSummaryInWords || overallSummary;
+    const strengths = (normalized.strengths || []).map(s => `<li>${esc(s)}</li>`).join('');
+    const improvements = (normalized.areasForImprovement || []).map(a => `<li>${esc(a)}</li>`).join('');
+    const safetyNotes = (normalized.safetyEvaluation?.notes || []).map(n => `<li>${esc(n)}</li>`).join('');
+    const recommendations = (normalized.recommendations || []).map(r => `<li>${esc(r)}</li>`).join('');
     return `
       <div class="rpt-ai-assessment">
         <div class="rpt-ai-grade-row">
-          <span class="rpt-ai-grade">${data.grade || 'B'}</span>
+          <span class="rpt-ai-grade">${esc(normalized.grade || 'B')}</span>
           <div class="rpt-ai-grade-info">
-            <span class="rpt-ai-grade-title">${data.gradeTitle || 'Good Performance'}</span>
-            <span class="rpt-ai-grade-desc">${data.gradeDescription || ''}</span>
+            <span class="rpt-ai-grade-title">${esc(normalized.gradeTitle || 'Good Performance')}</span>
+            <span class="rpt-ai-grade-desc">${esc(normalized.gradeDescription || '')}</span>
           </div>
         </div>
-        <p class="rpt-ai-summary">${data.overallSummary || ''}</p>
-        ${(data.reportSummaryInWords || data.overallSummary) ? `
+        ${overallSummary ? `<p class="rpt-ai-summary">${esc(overallSummary)}</p>` : ''}
+        ${reportSummary ? `
           <div class="rpt-ai-block">
             <h4 class="rpt-ai-block-title">${RptIcons.log} Report Summary</h4>
-            <p class="rpt-ai-summary">${data.reportSummaryInWords || data.overallSummary}</p>
+            <p class="rpt-ai-summary">${esc(reportSummary)}</p>
           </div>
         ` : ''}
         <div class="rpt-ai-meta">
-          <span class="rpt-ai-meta-tag">Efficiency: ${data.missionEfficiency || '\u2014'}</span>
-          <span class="rpt-ai-meta-tag">Compliance: ${data.complianceStatus || '\u2014'}</span>
-          <span class="rpt-ai-meta-tag">Safety: ${(data.safetyEvaluation?.rating || '\u2014')}</span>
-          <span class="rpt-ai-meta-tag">Risk Events: ${data.riskEvents ?? 0}</span>
+          <span class="rpt-ai-meta-tag">Efficiency: ${esc(normalized.missionEfficiency || '\u2014')}</span>
+          <span class="rpt-ai-meta-tag">Compliance: ${esc(normalized.complianceStatus || '\u2014')}</span>
+          <span class="rpt-ai-meta-tag">Safety: ${esc(normalized.safetyEvaluation?.rating || '\u2014')}</span>
+          <span class="rpt-ai-meta-tag">Risk Events: ${esc(normalized.riskEvents ?? 0)}</span>
         </div>
-        ${(data.strengths || []).length ? `<div class="rpt-ai-block"><h4 class="rpt-ai-block-title">${RptIcons.check} Strengths</h4><ul class="rpt-ai-list">${data.strengths.map(s => `<li>${s}</li>`).join('')}</ul></div>` : ''}
-        ${(data.areasForImprovement || []).length ? `<div class="rpt-ai-block"><h4 class="rpt-ai-block-title">${RptIcons.warn} Areas for Improvement</h4><ul class="rpt-ai-list">${data.areasForImprovement.map(a => `<li>${a}</li>`).join('')}</ul></div>` : ''}
-        ${(data.safetyEvaluation?.notes || []).length ? `<div class="rpt-ai-block"><h4 class="rpt-ai-block-title">${RptIcons.shield} Safety Evaluation</h4><ul class="rpt-ai-list">${data.safetyEvaluation.notes.map(n => `<li>${n}</li>`).join('')}</ul></div>` : ''}
-        ${(data.recommendations || []).length ? `<div class="rpt-ai-block"><h4 class="rpt-ai-block-title">${RptIcons.bulb} Recommendations</h4><ul class="rpt-ai-list">${data.recommendations.map(r => `<li>${r}</li>`).join('')}</ul></div>` : ''}
+        ${strengths ? `<div class="rpt-ai-block"><h4 class="rpt-ai-block-title">${RptIcons.check} Strengths</h4><ul class="rpt-ai-list">${strengths}</ul></div>` : ''}
+        ${improvements ? `<div class="rpt-ai-block"><h4 class="rpt-ai-block-title">${RptIcons.warn} Areas for Improvement</h4><ul class="rpt-ai-list">${improvements}</ul></div>` : ''}
+        ${safetyNotes ? `<div class="rpt-ai-block"><h4 class="rpt-ai-block-title">${RptIcons.shield} Safety Evaluation</h4><ul class="rpt-ai-list">${safetyNotes}</ul></div>` : ''}
+        ${recommendations ? `<div class="rpt-ai-block"><h4 class="rpt-ai-block-title">${RptIcons.bulb} Recommendations</h4><ul class="rpt-ai-list">${recommendations}</ul></div>` : ''}
       </div>`;
   },
 

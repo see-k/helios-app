@@ -20,6 +20,10 @@
 .reports-container::-webkit-scrollbar-track { background: transparent; }
 .reports-container::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 3px; }
 
+.reports-container > * {
+  flex-shrink: 0;
+}
+
 /* ── Page Header ── */
 .rpt-header {
   display: flex;
@@ -604,11 +608,49 @@
   color: var(--text-tertiary);
 }
 
+/* Loading state */
+.rpt-ai-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 40px 20px;
+  text-align: center;
+}
+
+.rpt-ai-spinner {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.1);
+  border-top-color: rgba(59, 130, 246, 0.8);
+  animation: rptSpin 0.8s linear infinite;
+}
+
+.rpt-ai-loading-text {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.rpt-ai-loading-subtext {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin: 0;
+}
+
 /* Assessment rendered */
 .rpt-ai-assessment {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  animation: fadeIn 0.5s ease-in-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .rpt-ai-grade-row {
@@ -646,6 +688,9 @@
   font-size: 12px;
   line-height: 1.5;
   color: var(--text-secondary);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
 }
 
 .rpt-ai-meta {
@@ -671,6 +716,9 @@
   font-size: 13px;
   line-height: 1.7;
   color: var(--text-secondary);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
 }
 
 .rpt-ai-block {
@@ -712,6 +760,9 @@
   font-size: 12px;
   line-height: 1.6;
   color: var(--text-secondary);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
 }
 
 .rpt-ai-list li::before {

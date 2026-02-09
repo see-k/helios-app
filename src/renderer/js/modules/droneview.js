@@ -158,8 +158,7 @@ export const DroneView = {
     });
 
     d.btnViewReport?.addEventListener('click', () => {
-      d.missionCompleteOverlay.classList.remove('visible');
-      if (_navigate) _navigate('reports');
+      this._generateReportForActiveDrone();
     });
     d.btnRestartMission?.addEventListener('click', () => {
       d.missionCompleteOverlay.classList.remove('visible');
