@@ -1311,3 +1311,328 @@
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+
+/* ── View Entire Fleet Button ── */
+.dv-interstitial-fleet-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 12px 24px;
+  border: 1px solid var(--glass-border);
+  border-radius: 14px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-primary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  margin-top: 10px;
+}
+
+.dv-interstitial-fleet-btn:hover {
+  background: var(--glass-bg-hover);
+  border-color: var(--glass-border-hover);
+  color: var(--text-primary);
+}
+
+.dv-interstitial-fleet-btn svg {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ── Drone Chips Bar ── */
+.dv-drone-chips-bar {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: 16px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.18);
+  max-width: calc(100% - 240px);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.dv-drone-chips-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.dv-drone-chips-bar:empty {
+  display: none;
+}
+
+.dv-drone-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px 6px 8px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.dv-drone-chip:hover {
+  background: var(--glass-bg-hover);
+}
+
+.dv-drone-chip.active {
+  border-color: var(--accent-primary);
+  background: rgba(var(--accent-primary-rgb), 0.08);
+}
+
+.dv-drone-chip-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dv-drone-chip-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.dv-drone-chip-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+  transition: all var(--transition-fast);
+}
+
+.dv-drone-chip-close:hover {
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
+}
+
+.dv-drone-chip-close svg {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ── Add Drone Button (floating on map) ── */
+.dv-add-drone-btn {
+  position: absolute;
+  bottom: 24px;
+  right: 24px;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border: 1px solid var(--glass-border);
+  border-radius: 50%;
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  color: var(--accent-primary);
+  cursor: pointer;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+  transition: all var(--transition-fast);
+}
+
+.dv-add-drone-btn:hover {
+  background: var(--glass-bg-hover);
+  border-color: var(--accent-primary);
+  box-shadow: 0 6px 28px rgba(var(--accent-primary-rgb), 0.3);
+  transform: scale(1.08);
+}
+
+.dv-add-drone-btn:active {
+  transform: scale(0.96);
+}
+
+.dv-add-drone-btn svg {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ── Mission Complete Overlay ── */
+.dv-mission-complete-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  opacity: 0;
+  pointer-events: none;
+  transition: all 0.4s ease;
+}
+
+.dv-mission-complete-overlay.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.dv-mission-complete-card {
+  max-width: 420px;
+  width: 90%;
+  padding: 36px;
+  border-radius: 24px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.3);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  transform: translateY(12px);
+  transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.dv-mission-complete-overlay.visible .dv-mission-complete-card {
+  transform: translateY(0);
+}
+
+.dv-mc-check {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: rgba(34, 197, 94, 0.12);
+  border: 2px solid rgba(34, 197, 94, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 16px;
+  color: #22c55e;
+}
+
+.dv-mc-check svg {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.dv-mc-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.dv-mc-subtitle {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin-bottom: 24px;
+  max-width: 340px;
+}
+
+.dv-mc-stats {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+  margin-bottom: 24px;
+}
+
+.dv-mc-stat {
+  flex: 1;
+  padding: 12px 8px;
+  border-radius: 12px;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.dv-mc-stat-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.dv-mc-stat-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin-top: 2px;
+}
+
+.dv-mc-actions {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+}
+
+.dv-mc-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  font-family: var(--font-primary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.dv-mc-btn svg {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.dv-mc-btn-secondary {
+  border: 1px solid var(--glass-border);
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.dv-mc-btn-secondary:hover {
+  background: var(--glass-bg-hover);
+  color: var(--text-primary);
+}
+
+.dv-mc-btn-primary {
+  border: none;
+  background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary, var(--accent-primary)));
+  color: #fff;
+  box-shadow: 0 4px 16px rgba(var(--accent-primary-rgb), 0.3);
+}
+
+.dv-mc-btn-primary:hover {
+  filter: brightness(1.1);
+  box-shadow: 0 6px 24px rgba(var(--accent-primary-rgb), 0.4);
+  transform: translateY(-1px);
+}
+
+.dv-mc-btn-primary:active {
+  transform: translateY(0);
+  filter: brightness(0.95);
+}

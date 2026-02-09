@@ -89,19 +89,20 @@ export function createAiMarkerIcon(label, type) {
 
 /**
  * Generate an SVG data-URI for the drone icon.
+ * @param {string} [color='#22c55e'] - Stroke/fill color for the drone.
  */
-export function createDroneIcon() {
+export function createDroneIcon(color = '#22c55e') {
   const svg = `
     <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">
       <defs>
         <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
-          <feDropShadow dx="0" dy="0" stdDeviation="3" flood-color="rgba(34,197,94,0.6)"/>
+          <feDropShadow dx="0" dy="0" stdDeviation="3" flood-color="${color}99"/>
         </filter>
       </defs>
-      <circle cx="20" cy="20" r="14" fill="#0a0a0f" stroke="#22c55e" stroke-width="2.5" filter="url(#glow)"/>
-      <circle cx="20" cy="20" r="8" fill="#22c55e" fill-opacity="0.2"/>
-      <polygon points="20,10 24,22 20,19 16,22" fill="#22c55e"/>
-      <circle cx="20" cy="20" r="3" fill="#22c55e"/>
+      <circle cx="20" cy="20" r="14" fill="#0a0a0f" stroke="${color}" stroke-width="2.5" filter="url(#glow)"/>
+      <circle cx="20" cy="20" r="8" fill="${color}" fill-opacity="0.2"/>
+      <polygon points="20,10 24,22 20,19 16,22" fill="${color}"/>
+      <circle cx="20" cy="20" r="3" fill="${color}"/>
     </svg>`;
   return 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg);
 }
