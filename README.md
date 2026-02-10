@@ -1,5 +1,7 @@
 # Helios - Professional eVTOL Drone Application
 
+![Helios Hero](src/utils/images/hero.png)
+
 A modern, cross-platform desktop and web application for professional drone fleet management and eVTOL operations.
 
 ## Features
@@ -10,6 +12,10 @@ A modern, cross-platform desktop and web application for professional drone flee
 - **Navigation**: Pill-shaped vertical menu with tooltips
 - **Dashboard**: Action pills for Support, Documentation, Connect, and Join
 - **Responsive**: Adapts to different screen sizes
+
+## Backend Connection
+
+To connect this application to any simulator or real drone, the backend API must be running. We use the [Helios SBC Service](https://github.com/see-k/helios-sbc-service) for this purpose. Detailed instructions on how to install it on a Pixhawk, Ardupilot, or DJI flight controller can be found in its repository's README.
 
 ## Technology Stack
 
