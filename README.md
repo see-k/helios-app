@@ -17,6 +17,8 @@ A modern, cross-platform desktop and web application for professional drone flee
 
 To connect this application to any simulator or real drone, the backend API must be running. We use the [Helios SBC Service](https://github.com/see-k/helios-sbc-service) for this purpose. Detailed instructions on how to install it on a Pixhawk, Ardupilot, or DJI flight controller can be found in its repository's README.
 
+![SBC Service Screenshot](src/utils/images/sbc.png)
+
 ## Technology Stack
 
 - **Electron**: Cross-platform desktop app framework
