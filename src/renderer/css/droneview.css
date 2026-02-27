@@ -1726,9 +1726,10 @@ body.dv-3d-active .dv-add-drone-btn:hover {
 }
 
 body.dv-3d-active .btn-follow-toggle.active {
-  background: rgba(var(--accent-primary-rgb), 0.25);
+  background: rgba(0, 0, 0, 0.85);
   border-color: rgba(var(--accent-primary-rgb), 0.4);
   color: var(--accent-primary);
+  box-shadow: 0 0 0 3px rgba(var(--accent-primary-rgb), 0.15);
 }
 
 body.dv-3d-active .dv-live-label {
