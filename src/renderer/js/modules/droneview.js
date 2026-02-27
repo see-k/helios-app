@@ -48,6 +48,9 @@ export const DroneView = {
   _map: null,
   _loadAttempted: false,
   _mapsReady: false,
+  _currentMapType: 'roadmap',
+  _is3DMode: false,
+  _autoFollowDrone: true,
   _dom: null,
   _weatherInterval: null,
 
@@ -74,12 +77,14 @@ export const DroneView = {
       dvLaunchBtn: document.getElementById('dvLaunchBtn'),
       dvAddDroneBtn: document.getElementById('dvAddDroneBtn'),
       dvViewFleetBtn: document.getElementById('dvViewFleetBtn'),
-      demoBadge: document.getElementById('dvDemoBadge'),
       droneIdLabel: document.getElementById('dvDroneIdLabel'),
       // Drone chips bar
       droneChipsBar: document.getElementById('dvDroneChipsBar'),
       // Map
       mapEl: document.getElementById('droneviewMap'),
+      dvMapTypeSelector: document.getElementById('dvMapTypeSelector'),
+      dvBtn3DToggle: document.getElementById('dvBtn3DToggle'),
+      dvBtnFollowToggle: document.getElementById('dvBtnFollowToggle'),
       // Telemetry
       altitude: document.getElementById('dvAltitude'),
       speed: document.getElementById('dvSpeed'),
@@ -143,6 +148,12 @@ export const DroneView = {
     d.dvLaunchBtn.addEventListener('click', () => this._launchDroneView());
     d.dvAddDroneBtn?.addEventListener('click', () => this._showInterstitial());
     d.dvViewFleetBtn?.addEventListener('click', () => this._viewEntireFleet());
+    // Map visualization controls (3D immersive view)
+    d.dvMapTypeSelector?.querySelectorAll('.map-type-btn').forEach(btn => {
+      btn.addEventListener('click', () => this._setMapType(btn.dataset.mapType));
+    });
+    d.dvBtn3DToggle?.addEventListener('click', () => this._toggle3DView());
+    d.dvBtnFollowToggle?.addEventListener('click', () => this._toggleFollowDrone());
 
     d.btnFlightAnalysis?.addEventListener('click', () => this._requestFlightAnalysis());
     d.btnAltRoutes?.addEventListener('click', () => this._requestAltRoutes());
@@ -170,6 +181,9 @@ export const DroneView = {
   },
 
   async onEnter() {
+    // Restore 3D body class if 3D mode is still active
+    if (this._is3DMode) document.body.classList.add('dv-3d-active');
+
     // If no drones active, show interstitial
     if (this._drones.size === 0) {
       this._showInterstitial();
@@ -190,6 +204,8 @@ export const DroneView = {
       clearInterval(this._weatherInterval);
       this._weatherInterval = null;
     }
+    // Remove 3D body class so nav-bar styling doesn't leak to other pages
+    document.body.classList.remove('dv-3d-active');
   },
 
   /** Called by Theme when theme changes. */
@@ -557,6 +573,7 @@ export const DroneView = {
     this._map = new google.maps.Map(d.mapEl, {
       center: { lat: 37.7900, lng: -122.4100 },
       zoom: 14,
+      mapTypeId: google.maps.MapTypeId.ROADMAP,
       styles: getMapStyles(),
       disableDefaultUI: true,
       zoomControl: true,
@@ -567,6 +584,54 @@ export const DroneView = {
       gestureHandling: 'greedy',
       clickableIcons: false
     });
+    // Re-center on drone after zoom completes so follow works at all zoom levels
+    this._map.addListener('zoom_changed', () => {
+      if (this._autoFollowDrone) {
+        // Defer to after zoom animation finishes
+        google.maps.event.addListenerOnce(this._map, 'idle', () => {
+          this._centerMapOnActiveDrone();
+        });
+      }
+    });
+  },
+
+  _setMapType(type) {
+    if (!this._map) return;
+    this._currentMapType = type;
+    this._map.setMapTypeId(google.maps.MapTypeId[type.toUpperCase()]);
+    const d = this._getDom();
+    d.dvMapTypeSelector?.querySelectorAll('.map-type-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.mapType === type);
+    });
+  },
+
+  _toggle3DView() {
+    if (!this._map) return;
+    const d = this._getDom();
+    this._is3DMode = !this._is3DMode;
+    if (this._is3DMode) {
+      this._map.setTilt(45);
+      this._map.setZoom(Math.min(this._map.getZoom() + 1, 20));
+      d.dvBtn3DToggle?.classList.add('active');
+      document.body.classList.add('dv-3d-active');
+    } else {
+      this._map.setTilt(0);
+      d.dvBtn3DToggle?.classList.remove('active');
+      document.body.classList.remove('dv-3d-active');
+    }
+  },
+
+  _toggleFollowDrone() {
+    this._autoFollowDrone = !this._autoFollowDrone;
+    const d = this._getDom();
+    d.dvBtnFollowToggle?.classList.toggle('active', this._autoFollowDrone);
+    if (this._autoFollowDrone) this._centerMapOnActiveDrone();
+  },
+
+  _centerMapOnActiveDrone() {
+    const entry = this._getActiveDrone();
+    if (!entry || !entry.telemetry.lat || !entry.telemetry.lng || !this._map) return;
+    this._map.setCenter({ lat: entry.telemetry.lat, lng: entry.telemetry.lng });
   },
 
   _addDroneToMap(entry) {
@@ -745,14 +810,10 @@ export const DroneView = {
     this._activeDroneId = droneId;
     const d = this._getDom();
 
-    // Update badges
-    if (entry.mode === 'demo') {
-      d.demoBadge.classList.remove('hidden');
-      d.droneIdLabel.textContent = `${entry.name} — ${entry.model}`;
-    } else {
-      d.demoBadge.classList.add('hidden');
-      d.droneIdLabel.textContent = `${entry.name}${entry.model ? ' — ' + entry.model : ''}`;
-    }
+    // Update live badge label
+    d.droneIdLabel.textContent = entry.mode === 'demo'
+      ? `${entry.name} — ${entry.model}`
+      : `${entry.name}${entry.model ? ' — ' + entry.model : ''}`;
 
     // Update panel title
     d.telemetryPanel.querySelector('.dv-panel-collapse-title h2').textContent = entry.name;
@@ -913,8 +974,8 @@ export const DroneView = {
 
       // Only update panel if this is the active drone
       if (entry.id === this._activeDroneId) {
-        if (Math.round(entry.simFraction * stepsPerSegment) % 20 === 0 && this._map) {
-          this._map.panTo(pos);
+        if (this._autoFollowDrone && this._map) {
+          this._map.setCenter(pos);
         }
         this._updateTelemetryUI(entry);
         this._updateProgress(entry);
@@ -1108,9 +1169,8 @@ export const DroneView = {
       this._updateTelemetryUI(entry);
       this._updateProgress(entry);
       this._updateWaypointStatuses(entry);
-      // Pan map every ~5s
-      if (now % 5000 < 200 && this._map) {
-        this._map.panTo({ lat: entry.telemetry.lat, lng: entry.telemetry.lng });
+      if (this._autoFollowDrone && this._map) {
+        this._map.setCenter({ lat: entry.telemetry.lat, lng: entry.telemetry.lng });
       }
     }
   },

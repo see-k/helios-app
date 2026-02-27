@@ -78,6 +78,49 @@
   border-left: 1px solid var(--glass-border);
 }
 
+/* ── Follow toggle (below 3D button) ── */
+.btn-follow-toggle {
+  position: absolute;
+  top: 118px;
+  right: 24px;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow);
+  color: var(--text-secondary);
+  font-family: var(--font-primary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.btn-follow-toggle svg {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.btn-follow-toggle:hover {
+  background: var(--glass-bg-hover);
+  border-color: var(--glass-border-hover);
+  color: var(--text-primary);
+  box-shadow: var(--glass-shadow-hover);
+}
+
+.btn-follow-toggle.active {
+  background: rgba(var(--accent-primary-rgb), 0.15);
+  border-color: rgba(var(--accent-primary-rgb), 0.3);
+  color: var(--accent-primary);
+  box-shadow: 0 0 0 3px rgba(var(--accent-primary-rgb), 0.1);
+}
+
 /* ── Telemetry Panel (left side, collapsible) ── */
 .dv-telemetry-panel {
   width: 320px;
@@ -1098,35 +1141,6 @@
   flex-shrink: 0;
 }
 
-/* ── Demo Data Badge ── */
-.dv-demo-badge {
-  position: absolute;
-  top: 16px;
-  right: 16px;
-  z-index: 25;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border-radius: 99px;
-  background: rgba(245, 158, 11, 0.12);
-  border: 1px solid rgba(245, 158, 11, 0.3);
-  color: #f59e0b;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.3px;
-}
-
-.dv-demo-badge svg {
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  flex-shrink: 0;
-}
-
-.dv-demo-badge.hidden {
-  display: none !important;
-}
-
 /* ══════════════════════════════════════════
    INTERSTITIAL (Drone Selection Screen)
    ══════════════════════════════════════════ */
@@ -1673,4 +1687,85 @@
 .dv-mc-btn-primary:active {
   transform: translateY(0);
   filter: brightness(0.95);
+}
+
+/* ── 3D Mode — solid dark backgrounds for map overlay controls ── */
+body.dv-3d-active .dv-map-controls,
+body.dv-3d-active .dv-live-badge,
+body.dv-3d-active .dv-drone-chips-bar,
+body.dv-3d-active .dv-expand-btn,
+body.dv-3d-active .dv-add-drone-btn,
+body.dv-3d-active .btn-follow-toggle {
+  background: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+body.dv-3d-active .dv-map-controls .map-type-btn {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+body.dv-3d-active .dv-map-controls .map-type-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+body.dv-3d-active .dv-map-controls .map-type-btn.active {
+  background: rgba(var(--accent-primary-rgb), 0.25);
+  color: var(--accent-primary);
+}
+
+body.dv-3d-active .btn-follow-toggle:hover,
+body.dv-3d-active .dv-expand-btn:hover,
+body.dv-3d-active .dv-add-drone-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
+
+body.dv-3d-active .btn-follow-toggle.active {
+  background: rgba(var(--accent-primary-rgb), 0.25);
+  border-color: rgba(var(--accent-primary-rgb), 0.4);
+  color: var(--accent-primary);
+}
+
+body.dv-3d-active .dv-live-label {
+  color: #22c55e;
+}
+
+body.dv-3d-active .dv-drone-id {
+  color: rgba(255, 255, 255, 0.6);
+  border-left-color: rgba(255, 255, 255, 0.12);
+}
+
+body.dv-3d-active .dv-drone-chip-name {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+body.dv-3d-active .dv-drone-chip:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* Nav-bar in 3D mode */
+body.dv-3d-active .nav-pill {
+  background: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+body.dv-3d-active .nav-item {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+body.dv-3d-active .nav-item:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+body.dv-3d-active .nav-item.active {
+  color: var(--accent-primary);
+  background: rgba(var(--accent-primary-rgb), 0.2);
 }

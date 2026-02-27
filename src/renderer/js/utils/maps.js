@@ -88,21 +88,31 @@ export function createAiMarkerIcon(label, type) {
 }
 
 /**
- * Generate an SVG data-URI for the drone icon.
+ * Generate an SVG data-URI for the drone map marker (quadcopter top-down view).
  * @param {string} [color='#22c55e'] - Stroke/fill color for the drone.
  */
 export function createDroneIcon(color = '#22c55e') {
   const svg = `
     <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">
       <defs>
-        <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
-          <feDropShadow dx="0" dy="0" stdDeviation="3" flood-color="${color}99"/>
+        <filter id="droneGlow" x="-50%" y="-50%" width="200%" height="200%">
+          <feDropShadow dx="0" dy="0" stdDeviation="2" flood-color="${color}99"/>
         </filter>
       </defs>
-      <circle cx="20" cy="20" r="14" fill="#0a0a0f" stroke="${color}" stroke-width="2.5" filter="url(#glow)"/>
-      <circle cx="20" cy="20" r="8" fill="${color}" fill-opacity="0.2"/>
-      <polygon points="20,10 24,22 20,19 16,22" fill="${color}"/>
-      <circle cx="20" cy="20" r="3" fill="${color}"/>
+      <!-- Outer ring for visibility on map -->
+      <circle cx="20" cy="20" r="18" fill="rgba(10,10,15,0.85)" stroke="${color}" stroke-width="2" filter="url(#droneGlow)"/>
+      <!-- Quadcopter arms (4 lines from center) -->
+      <line x1="20" y1="20" x2="20" y2="6" stroke="${color}" stroke-width="2" stroke-linecap="round"/>
+      <line x1="20" y1="20" x2="34" y2="20" stroke="${color}" stroke-width="2" stroke-linecap="round"/>
+      <line x1="20" y1="20" x2="20" y2="34" stroke="${color}" stroke-width="2" stroke-linecap="round"/>
+      <line x1="20" y1="20" x2="6" y2="20" stroke="${color}" stroke-width="2" stroke-linecap="round"/>
+      <!-- Central body -->
+      <circle cx="20" cy="20" r="5" fill="${color}"/>
+      <!-- Propeller circles (quadcopter signature) -->
+      <circle cx="20" cy="6" r="4" fill="${color}" stroke="#0a0a0f" stroke-width="1"/>
+      <circle cx="34" cy="20" r="4" fill="${color}" stroke="#0a0a0f" stroke-width="1"/>
+      <circle cx="20" cy="34" r="4" fill="${color}" stroke="#0a0a0f" stroke-width="1"/>
+      <circle cx="6" cy="20" r="4" fill="${color}" stroke="#0a0a0f" stroke-width="1"/>
     </svg>`;
   return 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg);
 }
