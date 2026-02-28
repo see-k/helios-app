@@ -36,7 +36,7 @@ async function _doLoad() {
 
   return new Promise((resolve) => {
     const script = document.createElement('script');
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&callback=__heliosMapInit`;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&v=alpha&callback=__heliosMapInit`;
     script.async = true;
     script.defer = true;
 

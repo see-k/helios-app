@@ -1,6 +1,6 @@
 /* ── DroneView Module — Multi-Drone Live Tracking, Simulation & AI Analysis ── */
 import { state } from '../state.js';
-import { getMapStyles, createMarkerIcon, createAiMarkerIcon, createDroneIcon, haversine, bearing } from '../utils/maps.js';
+import { getMapStyles, createMarkerIcon, createAiMarkerIcon, createDroneIcon, createDroneOrb3D, haversine, bearing } from '../utils/maps.js';
 import { callGemini, getGeminiApiKey } from '../services/gemini.js';
 import { weatherCodeToInfo, windDirToCompass } from '../services/weather.js';
 import { loadGoogleMaps } from '../services/maps-loader.js';
@@ -49,10 +49,20 @@ export const DroneView = {
   _loadAttempted: false,
   _mapsReady: false,
   _currentMapType: 'roadmap',
-  _is3DMode: false,
+  _is3DMode: false,       // true when any 3D mode is active
+  _3dModeType: null,      // null | 'classic' | 'photorealistic'
   _autoFollowDrone: true,
   _dom: null,
   _weatherInterval: null,
+
+  // ── 3D (Map3DElement) state ──
+  _map3d: null,
+  _map3dReady: false,             // true after gmp-ready fires on Map3DElement
+  _3dMarkers: new Map(),          // drone ID → Marker3DElement
+  _3dRoutePolylines: new Map(),   // drone ID → Polyline3DElement (route)
+  _3dTrailPolylines: new Map(),   // drone ID → Polyline3DElement (trail)
+  _3dTrailCoords: new Map(),      // drone ID → [{lat,lng,altitude}] array
+  _3dWaypointMarkers: [],         // array of waypoint Marker3DElements
 
   // ── Drone registry: Map<string, DroneEntry> ──
   // key = "demo-0", "demo-1", "demo-2", or "live-<fleet_id>"
@@ -84,6 +94,8 @@ export const DroneView = {
       mapEl: document.getElementById('droneviewMap'),
       dvMapTypeSelector: document.getElementById('dvMapTypeSelector'),
       dvBtn3DToggle: document.getElementById('dvBtn3DToggle'),
+      dv3DSelector: document.getElementById('dv3DSelector'),
+      dv3DDropdown: document.getElementById('dv3DDropdown'),
       dvBtnFollowToggle: document.getElementById('dvBtnFollowToggle'),
       // Telemetry
       altitude: document.getElementById('dvAltitude'),
@@ -152,7 +164,27 @@ export const DroneView = {
     d.dvMapTypeSelector?.querySelectorAll('.map-type-btn').forEach(btn => {
       btn.addEventListener('click', () => this._setMapType(btn.dataset.mapType));
     });
-    d.dvBtn3DToggle?.addEventListener('click', () => this._toggle3DView());
+    d.dvBtn3DToggle?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (this._is3DMode) {
+        // If already in 3D, clicking the main button exits 3D
+        this._set3DMode(null);
+        d.dv3DSelector?.classList.remove('open');
+      } else {
+        // Toggle dropdown open/closed
+        d.dv3DSelector?.classList.toggle('open');
+      }
+    });
+    d.dv3DDropdown?.querySelectorAll('.dv-3d-option').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const mode = btn.dataset.mode;
+        d.dv3DSelector?.classList.remove('open');
+        this._set3DMode(mode);
+      });
+    });
+    // Close dropdown when clicking elsewhere
+    document.addEventListener('click', () => d.dv3DSelector?.classList.remove('open'));
     d.dvBtnFollowToggle?.addEventListener('click', () => this._toggleFollowDrone());
 
     d.btnFlightAnalysis?.addEventListener('click', () => this._requestFlightAnalysis());
@@ -191,7 +223,7 @@ export const DroneView = {
     } else {
       // Return to the view with existing drones
       this._hideInterstitial();
-      if (this._map) {
+      if (this._map && this._3dModeType !== 'photorealistic') {
         google.maps.event.trigger(this._map, 'resize');
       }
     }
@@ -206,6 +238,7 @@ export const DroneView = {
     }
     // Remove 3D body class so nav-bar styling doesn't leak to other pages
     document.body.classList.remove('dv-3d-active');
+    // Note: we keep the 3D map alive so it can be restored on re-enter
   },
 
   /** Called by Theme when theme changes. */
@@ -605,20 +638,195 @@ export const DroneView = {
     });
   },
 
-  _toggle3DView() {
+  async _set3DMode(mode) {
     if (!this._map) return;
     const d = this._getDom();
-    this._is3DMode = !this._is3DMode;
+
+    // ── Exit current 3D mode first (if any) ──
     if (this._is3DMode) {
-      this._map.setTilt(45);
-      this._map.setZoom(Math.min(this._map.getZoom() + 1, 20));
-      d.dvBtn3DToggle?.classList.add('active');
-      document.body.classList.add('dv-3d-active');
-    } else {
-      this._map.setTilt(0);
-      d.dvBtn3DToggle?.classList.remove('active');
+      if (this._3dModeType === 'photorealistic') {
+        this._removeAll3DElements();
+        if (this._map3d) { this._map3d.remove(); this._map3d = null; }
+        this._map3dReady = false;
+        d.mapEl.classList.remove('hidden-for-3d');
+        google.maps.event.trigger(this._map, 'resize');
+      } else if (this._3dModeType === 'classic') {
+        this._map.setTilt(0);
+        this._map.setHeading(0);
+      }
+      this._is3DMode = false;
+      this._3dModeType = null;
+      d.dv3DSelector?.classList.remove('active');
       document.body.classList.remove('dv-3d-active');
+      d.dv3DDropdown?.querySelectorAll('.dv-3d-option').forEach(o => o.classList.remove('active'));
     }
+
+    // If mode is null we just wanted to exit — done
+    if (!mode) return;
+
+    // ── Enter new 3D mode ──
+    if (mode === 'classic') {
+      // Classic 3D: tilt the satellite map at 45°
+      this._setMapType('satellite');
+      this._map.setTilt(45);
+      this._map.setZoom(Math.max(this._map.getZoom(), 17));
+      this._is3DMode = true;
+      this._3dModeType = 'classic';
+    } else if (mode === 'photorealistic') {
+      // Photorealistic 3D: Map3DElement (Google preview API)
+      try {
+        await google.maps.importLibrary('maps3d');
+      } catch (err) {
+        console.warn('[DroneView] Failed to load maps3d library:', err);
+        this._showError('Photorealistic 3D not available. Check your API key or try Classic 3D instead.');
+        return;
+      }
+
+      d.mapEl.classList.add('hidden-for-3d');
+
+      const active = this._getActiveDrone();
+      const lat = active?.telemetry?.lat || 37.79;
+      const lng = active?.telemetry?.lng || -122.41;
+      const alt = active?.telemetry?.altitude || 80;
+
+      const map3d = document.createElement('gmp-map-3d');
+      map3d.setAttribute('center', `${lat},${lng},${alt}`);
+      map3d.setAttribute('tilt', '67');
+      map3d.setAttribute('range', '1500');
+      map3d.setAttribute('heading', '0');
+      map3d.setAttribute('mode', 'HYBRID');
+      d.mapEl.parentElement.appendChild(map3d);
+      this._map3d = map3d;
+      this._map3dReady = true;
+
+      for (const [, entry] of this._drones) {
+        this._addDroneTo3D(entry);
+      }
+
+      this._is3DMode = true;
+      this._3dModeType = 'photorealistic';
+    }
+
+    // Update UI
+    d.dv3DSelector?.classList.add('active');
+    document.body.classList.add('dv-3d-active');
+    const activeOpt = d.dv3DDropdown?.querySelector(`.dv-3d-option[data-mode="${mode}"]`);
+    activeOpt?.classList.add('active');
+  },
+
+  // ── 3D Helpers ──
+
+  _create3DMarker(position, svgDataUri, altitudeM) {
+    const { Marker3DElement } = google.maps.maps3d;
+    const marker = new Marker3DElement({
+      position: { lat: position.lat, lng: position.lng, altitude: altitudeM || 0 },
+      altitudeMode: 'RELATIVE_TO_GROUND',
+      extruded: true,
+      sizePreserved: true,
+      collisionBehavior: 'REQUIRED'
+    });
+
+    // Parse inline SVG from data URI and embed as real SVG element (per Google docs pattern)
+    const template = document.createElement('template');
+    try {
+      const svgText = decodeURIComponent(svgDataUri.split(',')[1]);
+      const parser = new DOMParser();
+      const svgDoc = parser.parseFromString(svgText, 'image/svg+xml');
+      const svgEl = svgDoc.documentElement;
+      svgEl.style.width = '40px';
+      svgEl.style.height = '40px';
+      template.content.append(svgEl);
+    } catch {
+      // Fallback: use img tag with the data URI
+      const img = document.createElement('img');
+      img.src = svgDataUri;
+      img.style.width = '40px';
+      img.style.height = '40px';
+      template.content.append(img);
+    }
+    marker.append(template);
+    return marker;
+  },
+
+  _addDroneTo3D(entry) {
+    if (!this._map3d) return;
+    const { Polyline3DElement } = google.maps.maps3d;
+
+    const lat = entry.telemetry?.lat || entry.waypoints[0]?.lat || 37.79;
+    const lng = entry.telemetry?.lng || entry.waypoints[0]?.lng || -122.41;
+    const alt = entry.telemetry?.altitude || entry.waypoints[0]?.alt || 80;
+
+    // Drone marker (glowing orb for 3D view)
+    const droneMarker = this._create3DMarker(
+      { lat, lng }, createDroneOrb3D(entry.color), alt
+    );
+    this._map3d.append(droneMarker);
+    this._3dMarkers.set(entry.id, droneMarker);
+
+    // Route polyline
+    if (entry.waypoints.length > 1) {
+      const routePoly = new Polyline3DElement({
+        altitudeMode: 'RELATIVE_TO_GROUND',
+        strokeColor: entry.color,
+        strokeWidth: 4,
+        drawsOccludedSegments: true
+      });
+      routePoly.path = entry.waypoints.map(w => ({ lat: w.lat, lng: w.lng, altitude: w.alt || 0 }));
+      this._map3d.append(routePoly);
+      this._3dRoutePolylines.set(entry.id, routePoly);
+    }
+
+    // Trail polyline
+    const trailPoly = new Polyline3DElement({
+      altitudeMode: 'RELATIVE_TO_GROUND',
+      strokeColor: entry.color,
+      strokeWidth: 4,
+      drawsOccludedSegments: true
+    });
+    // Seed trail from 2D trail path if available
+    const seedCoords = [];
+    if (entry.trailPolyline) {
+      const path2d = entry.trailPolyline.getPath();
+      for (let i = 0; i < path2d.getLength(); i++) {
+        const pt = path2d.getAt(i);
+        seedCoords.push({ lat: pt.lat(), lng: pt.lng(), altitude: alt });
+      }
+    }
+    trailPoly.path = seedCoords;
+    this._3dTrailCoords.set(entry.id, [...seedCoords]);
+    this._map3d.append(trailPoly);
+    this._3dTrailPolylines.set(entry.id, trailPoly);
+
+    // Waypoint markers
+    entry.waypoints.forEach((wp, i) => {
+      const type = wp.type;
+      const label = type === 'takeoff' ? 'T' : type === 'rtl' ? 'R' : String(i);
+      const wpMarker = this._create3DMarker(
+        { lat: wp.lat, lng: wp.lng }, createMarkerIcon(label, type), wp.alt || 0
+      );
+      this._map3d.append(wpMarker);
+      this._3dWaypointMarkers.push(wpMarker);
+    });
+  },
+
+  _removeAll3DElements() {
+    for (const [, m] of this._3dMarkers) m.remove();
+    this._3dMarkers.clear();
+    for (const [, p] of this._3dRoutePolylines) p.remove();
+    this._3dRoutePolylines.clear();
+    for (const [, p] of this._3dTrailPolylines) p.remove();
+    this._3dTrailPolylines.clear();
+    this._3dTrailCoords.clear();
+    this._3dWaypointMarkers.forEach(m => m.remove());
+    this._3dWaypointMarkers = [];
+  },
+
+  _update3DTrail(entry, lat, lng, alt) {
+    const coords = this._3dTrailCoords.get(entry.id);
+    const poly = this._3dTrailPolylines.get(entry.id);
+    if (!coords || !poly) return;
+    coords.push({ lat, lng, altitude: alt || 0 });
+    poly.path = coords;
   },
 
   _toggleFollowDrone() {
@@ -630,8 +838,13 @@ export const DroneView = {
 
   _centerMapOnActiveDrone() {
     const entry = this._getActiveDrone();
-    if (!entry || !entry.telemetry.lat || !entry.telemetry.lng || !this._map) return;
-    this._map.setCenter({ lat: entry.telemetry.lat, lng: entry.telemetry.lng });
+    if (!entry || !entry.telemetry.lat || !entry.telemetry.lng) return;
+    if (this._is3DMode && this._map3d) {
+      const alt = entry.telemetry.altitude || 0;
+      this._map3d.center = { lat: entry.telemetry.lat, lng: entry.telemetry.lng, altitude: alt };
+    } else if (this._map) {
+      this._map.setCenter({ lat: entry.telemetry.lat, lng: entry.telemetry.lng });
+    }
   },
 
   _addDroneToMap(entry) {
@@ -679,6 +892,11 @@ export const DroneView = {
     entry.droneMarker.addListener('click', () => {
       this._selectDrone(entry.id);
     });
+
+    // If 3D mode is active and map3d is ready, also add to the 3D map
+    if (this._is3DMode && this._map3dReady) {
+      this._addDroneTo3D(entry);
+    }
   },
 
   _removeDroneFromMap(entry) {
@@ -689,7 +907,7 @@ export const DroneView = {
     }
     this._disconnectWebSocket(entry);
 
-    // Remove map objects
+    // Remove 2D map objects
     if (entry.droneMarker) { entry.droneMarker.setMap(null); entry.droneMarker = null; }
     if (entry.routePolyline) { entry.routePolyline.setMap(null); entry.routePolyline = null; }
     if (entry.trailPolyline) { entry.trailPolyline.setMap(null); entry.trailPolyline = null; }
@@ -699,9 +917,19 @@ export const DroneView = {
     entry.altRoutePolylines = [];
     entry.altRouteMarkers.forEach(m => m.setMap(null));
     entry.altRouteMarkers = [];
+
+    // Remove 3D elements for this drone
+    const m3d = this._3dMarkers.get(entry.id);
+    if (m3d) { m3d.remove(); this._3dMarkers.delete(entry.id); }
+    const rp3d = this._3dRoutePolylines.get(entry.id);
+    if (rp3d) { rp3d.remove(); this._3dRoutePolylines.delete(entry.id); }
+    const tp3d = this._3dTrailPolylines.get(entry.id);
+    if (tp3d) { tp3d.remove(); this._3dTrailPolylines.delete(entry.id); }
+    this._3dTrailCoords.delete(entry.id);
   },
 
   _rebuildWaypointMarkers(entry) {
+    // Clear 2D
     entry.waypointMarkers.forEach(m => m.setMap(null));
     entry.waypointMarkers = [];
 
@@ -721,6 +949,27 @@ export const DroneView = {
       });
       entry.waypointMarkers.push(marker);
     });
+
+    // Rebuild 3D waypoint markers if in 3D mode
+    if (this._is3DMode && this._map3d) {
+      this._3dWaypointMarkers.forEach(m => m.remove());
+      this._3dWaypointMarkers = [];
+      entry.waypoints.forEach((wp, i) => {
+        const type = wp.type;
+        const label = type === 'takeoff' ? 'T' : type === 'rtl' ? 'R' : String(i);
+        const wpMarker = this._create3DMarker(
+          { lat: wp.lat, lng: wp.lng }, createMarkerIcon(label, type), wp.alt || 0
+        );
+        this._map3d.append(wpMarker);
+        this._3dWaypointMarkers.push(wpMarker);
+      });
+
+      // Update 3D route polyline
+      const rp3d = this._3dRoutePolylines.get(entry.id);
+      if (rp3d) {
+        rp3d.path = entry.waypoints.map(w => ({ lat: w.lat, lng: w.lng, altitude: w.alt || 0 }));
+      }
+    }
   },
 
   _applyDroneWaypointsToMap(entry, { restart = false } = {}) {
@@ -765,23 +1014,54 @@ export const DroneView = {
   },
 
   _fitMapToAllDrones() {
-    if (!this._map || this._drones.size === 0) return;
-    const bounds = new google.maps.LatLngBounds();
-    let hasPoints = false;
+    if (this._drones.size === 0) return;
 
-    for (const [, entry] of this._drones) {
-      entry.waypoints.forEach(wp => {
-        bounds.extend({ lat: wp.lat, lng: wp.lng });
-        hasPoints = true;
-      });
-      if (entry.telemetry.lat && entry.telemetry.lng) {
-        bounds.extend({ lat: entry.telemetry.lat, lng: entry.telemetry.lng });
-        hasPoints = true;
+    if (this._is3DMode && this._map3d) {
+      // Compute center of all points and use flyCameraTo
+      let sumLat = 0, sumLng = 0, count = 0, maxAlt = 0;
+      for (const [, entry] of this._drones) {
+        entry.waypoints.forEach(wp => {
+          sumLat += wp.lat; sumLng += wp.lng; count++;
+          if (wp.alt > maxAlt) maxAlt = wp.alt;
+        });
+        if (entry.telemetry.lat && entry.telemetry.lng) {
+          sumLat += entry.telemetry.lat; sumLng += entry.telemetry.lng; count++;
+        }
       }
-    }
+      if (count > 0) {
+        const centerPos = { lat: sumLat / count, lng: sumLng / count, altitude: maxAlt };
+        if (this._map3dReady && typeof this._map3d.flyCameraTo === 'function') {
+          this._map3d.flyCameraTo({
+            endCamera: {
+              center: centerPos,
+              tilt: 67,
+              range: this._drones.size > 1 ? 3000 : 1500,
+              heading: 0
+            },
+            durationMillis: 1000
+          });
+        } else {
+          this._map3d.center = centerPos;
+        }
+      }
+    } else if (this._map) {
+      const bounds = new google.maps.LatLngBounds();
+      let hasPoints = false;
 
-    if (hasPoints) {
-      this._map.fitBounds(bounds, 80);
+      for (const [, entry] of this._drones) {
+        entry.waypoints.forEach(wp => {
+          bounds.extend({ lat: wp.lat, lng: wp.lng });
+          hasPoints = true;
+        });
+        if (entry.telemetry.lat && entry.telemetry.lng) {
+          bounds.extend({ lat: entry.telemetry.lat, lng: entry.telemetry.lng });
+          hasPoints = true;
+        }
+      }
+
+      if (hasPoints) {
+        this._map.fitBounds(bounds, 80);
+      }
     }
   },
 
@@ -830,8 +1110,25 @@ export const DroneView = {
     this._highlightChip(droneId);
 
     // Pan map to this drone
-    if (this._map && entry.telemetry.lat && entry.telemetry.lng) {
-      this._map.panTo({ lat: entry.telemetry.lat, lng: entry.telemetry.lng });
+    if (entry.telemetry.lat && entry.telemetry.lng) {
+      if (this._is3DMode && this._map3d) {
+        const alt = entry.telemetry.altitude || 0;
+        if (this._map3dReady && typeof this._map3d.flyCameraTo === 'function') {
+          this._map3d.flyCameraTo({
+            endCamera: {
+              center: { lat: entry.telemetry.lat, lng: entry.telemetry.lng, altitude: alt },
+              tilt: 67,
+              range: 1500,
+              heading: this._map3d.heading || 0
+            },
+            durationMillis: 800
+          });
+        } else {
+          this._map3d.center = { lat: entry.telemetry.lat, lng: entry.telemetry.lng, altitude: alt };
+        }
+      } else if (this._map) {
+        this._map.panTo({ lat: entry.telemetry.lat, lng: entry.telemetry.lng });
+      }
     }
   },
 
@@ -972,10 +1269,21 @@ export const DroneView = {
         path.push(new google.maps.LatLng(lat, lng));
       }
 
+      // 3D updates (photorealistic only — classic uses the same 2D map)
+      if (this._3dModeType === 'photorealistic') {
+        const marker3d = this._3dMarkers.get(entry.id);
+        if (marker3d) marker3d.position = { lat, lng, altitude: alt };
+        this._update3DTrail(entry, lat, lng, alt);
+      }
+
       // Only update panel if this is the active drone
       if (entry.id === this._activeDroneId) {
-        if (this._autoFollowDrone && this._map) {
-          this._map.setCenter(pos);
+        if (this._autoFollowDrone) {
+          if (this._3dModeType === 'photorealistic' && this._map3d) {
+            this._map3d.center = { lat, lng, altitude: alt };
+          } else if (this._map) {
+            this._map.setCenter(pos);
+          }
         }
         this._updateTelemetryUI(entry);
         this._updateProgress(entry);
@@ -1146,10 +1454,24 @@ export const DroneView = {
         entry.trailThrottleTime = now;
       }
 
-      if (!entry.mapCenteredOnLive && this._map) {
-        this._map.setCenter({ lat, lng });
-        if (entry.waypoints.length === 0) this._map.setZoom(16);
-        entry.mapCenteredOnLive = true;
+      // 3D updates (photorealistic only)
+      if (this._3dModeType === 'photorealistic') {
+        const marker3d = this._3dMarkers.get(entry.id);
+        if (marker3d) marker3d.position = { lat, lng, altitude: alt };
+        if (now - entry.trailThrottleTime <= 1000) {
+          this._update3DTrail(entry, lat, lng, alt);
+        }
+      }
+
+      if (!entry.mapCenteredOnLive) {
+        if (this._3dModeType === 'photorealistic' && this._map3d) {
+          this._map3d.center = { lat, lng, altitude: alt };
+          entry.mapCenteredOnLive = true;
+        } else if (this._map) {
+          this._map.setCenter({ lat, lng });
+          if (entry.waypoints.length === 0) this._map.setZoom(16);
+          entry.mapCenteredOnLive = true;
+        }
       }
 
       this._checkWaypointProximity(entry, lat, lng);
@@ -1169,8 +1491,12 @@ export const DroneView = {
       this._updateTelemetryUI(entry);
       this._updateProgress(entry);
       this._updateWaypointStatuses(entry);
-      if (this._autoFollowDrone && this._map) {
-        this._map.setCenter({ lat: entry.telemetry.lat, lng: entry.telemetry.lng });
+      if (this._autoFollowDrone) {
+        if (this._is3DMode && this._map3d) {
+          this._map3d.center = { lat: entry.telemetry.lat, lng: entry.telemetry.lng, altitude: entry.telemetry.altitude || 0 };
+        } else if (this._map) {
+          this._map.setCenter({ lat: entry.telemetry.lat, lng: entry.telemetry.lng });
+        }
       }
     }
   },

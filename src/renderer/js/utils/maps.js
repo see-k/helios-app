@@ -118,6 +118,36 @@ export function createDroneIcon(color = '#22c55e') {
 }
 
 /**
+ * Generate an SVG data-URI for the 3D drone orb (glowing sphere with pulse ring).
+ * @param {string} [color='#22c55e'] - Primary color for the orb.
+ */
+export function createDroneOrb3D(color = '#22c55e') {
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">
+      <defs>
+        <radialGradient id="orbGrad" cx="40%" cy="35%" r="50%">
+          <stop offset="0%" stop-color="#fff" stop-opacity="0.9"/>
+          <stop offset="40%" stop-color="${color}" stop-opacity="1"/>
+          <stop offset="100%" stop-color="${color}" stop-opacity="0.6"/>
+        </radialGradient>
+        <filter id="orbGlow" x="-80%" y="-80%" width="260%" height="260%">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="blur"/>
+          <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+        </filter>
+      </defs>
+      <!-- Outer pulse ring -->
+      <circle cx="24" cy="24" r="20" fill="none" stroke="${color}" stroke-width="1.5" opacity="0.3"/>
+      <!-- Glow halo -->
+      <circle cx="24" cy="24" r="12" fill="${color}" opacity="0.15" filter="url(#orbGlow)"/>
+      <!-- Main orb sphere -->
+      <circle cx="24" cy="24" r="10" fill="url(#orbGrad)" stroke="${color}" stroke-width="1.5" stroke-opacity="0.6"/>
+      <!-- Specular highlight -->
+      <ellipse cx="21" cy="21" rx="4" ry="3" fill="#fff" opacity="0.45"/>
+    </svg>`;
+  return 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg);
+}
+
+/**
  * Haversine distance in metres between two lat/lng pairs.
  */
 export function haversine(lat1, lng1, lat2, lng2) {
