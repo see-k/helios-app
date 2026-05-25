@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https://sketchfab.com https://maps.googleapis.com https://maps.gstatic.com https://maps.google.com https://generativelanguage.googleapis.com https://api.open-meteo.com; connect-src 'self' https://generativelanguage.googleapis.com https://api.open-meteo.com https://maps.googleapis.com https://*.googleapis.com https://*.gstatic.com https://*.google.com ws: wss:; img-src 'self' data: blob: https://*.googleapis.com https://*.gstatic.com https://*.google.com https://*.googleusercontent.com https://*.ggpht.com; frame-src https://sketchfab.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com https://fonts.googleapis.com; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://maps.googleapis.com https://*.googleapis.com; worker-src 'self' blob:;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https://maps.googleapis.com https://maps.gstatic.com https://maps.google.com https://generativelanguage.googleapis.com https://api.open-meteo.com; connect-src 'self' https://generativelanguage.googleapis.com https://api.open-meteo.com https://maps.googleapis.com https://*.googleapis.com https://*.gstatic.com https://*.google.com ws: wss:; img-src 'self' data: blob: https://*.googleapis.com https://*.gstatic.com https://*.google.com https://*.googleusercontent.com https://*.ggpht.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com https://fonts.googleapis.com; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://maps.googleapis.com https://*.googleapis.com; worker-src 'self' blob:;">
   <title>Helios</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -46,19 +46,19 @@
 
   <!-- 3D Model Background -->
   <div class="model-background" id="modelBackground">
-    <iframe 
-      title="Helios" 
-      frameborder="0" 
-      allowfullscreen 
-      mozallowfullscreen="true" 
-      webkitallowfullscreen="true" 
-      allow="autoplay; fullscreen; xr-spatial-tracking" 
-      xr-spatial-tracking 
-      execution-while-out-of-viewport 
-      execution-while-not-rendered 
-      web-share 
-      src="https://sketchfab.com/models/e28b781525074050b7a066b17b388ef5/embed?transparent=1&autostart=1&ui_stop=0&ui_inspector=0&ui_watermark=0&ui_watermark_link=0&ui_ar=0&ui_help=0&ui_settings=0&ui_vr=0&ui_fullscreen=0&ui_annotations=0&ui_infos=0">
-    </iframe>
+    <model-viewer
+      src="../utils/models/helios.glb"
+      alt="Helios eVTOL drone 3D model"
+      auto-rotate
+      auto-rotate-delay="0"
+      rotation-per-second="12deg"
+      camera-controls
+      disable-zoom
+      interaction-prompt="none"
+      shadow-intensity="0"
+      exposure="0.8"
+      style="width:100%;height:100%;background:transparent;">
+    </model-viewer>
     <div class="model-overlay"></div>
   </div>
 
@@ -1045,6 +1045,7 @@
   </div>
 
   <script src="../../node_modules/chart.js/dist/chart.umd.js"></script>
+  <script type="module" src="../../node_modules/@google/model-viewer/dist/model-viewer.min.js"></script>
   <script type="module" src="js/app.js"></script>
 </body>
 </html>
