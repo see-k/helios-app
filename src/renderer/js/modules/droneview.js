@@ -1,6 +1,7 @@
 /* ── DroneView Module — Multi-Drone Live Tracking, Simulation & AI Analysis ── */
 import { state } from '../state.js';
 import { getMapStyles, createMarkerIcon, createAiMarkerIcon, createDroneIcon, createDroneOrb3D, haversine, bearing } from '../utils/maps.js';
+import { createDroneModelOverlay } from '../utils/drone-model-overlay.js';
 import { callAI, getAIProviderLabel } from '../services/ai.js';
 import { weatherCodeToInfo, windDirToCompass } from '../services/weather.js';
 import { loadGoogleMaps } from '../services/maps-loader.js';
@@ -878,19 +879,15 @@ export const DroneView = {
     // Waypoint markers
     this._rebuildWaypointMarkers(entry);
 
-    // Drone marker
+    // Drone marker — custom <model-viewer> overlay rendering the helios.glb 3D model
     const launch = entry.waypoints[0] || { lat: entry.telemetry.lat || 37.7749, lng: entry.telemetry.lng || -122.4194 };
-    entry.droneMarker = new google.maps.Marker({
+    entry.droneMarker = createDroneModelOverlay({
       position: { lat: launch.lat, lng: launch.lng },
-      map: this._map,
-      icon: {
-        url: createDroneIcon(entry.color),
-        scaledSize: new google.maps.Size(40, 40),
-        anchor: new google.maps.Point(20, 20)
-      },
+      color: entry.color,
       title: `${entry.name}${entry.model ? ' — ' + entry.model : ''}`,
-      zIndex: 1000
+      size: 72
     });
+    entry.droneMarker.setMap(this._map);
 
     // Click on drone marker -> select this drone
     entry.droneMarker.addListener('click', () => {
@@ -1267,7 +1264,10 @@ export const DroneView = {
       };
 
       const pos = { lat, lng };
-      if (entry.droneMarker) entry.droneMarker.setPosition(pos);
+      if (entry.droneMarker) {
+        entry.droneMarker.setPosition(pos);
+        entry.droneMarker.setHeading?.(hdg);
+      }
       if (entry.trailPolyline) {
         const path = entry.trailPolyline.getPath();
         path.push(new google.maps.LatLng(lat, lng));
@@ -1450,7 +1450,13 @@ export const DroneView = {
       entry.lastWsPosition = { lat, lng };
       entry.lastWsTime = now;
 
-      if (entry.droneMarker) entry.droneMarker.setPosition({ lat, lng });
+      if (entry.droneMarker) {
+        entry.droneMarker.setPosition({ lat, lng });
+        const hdg = (data.attitude && typeof data.attitude.yaw_deg === 'number')
+          ? data.attitude.yaw_deg
+          : entry.telemetry.heading;
+        entry.droneMarker.setHeading?.(hdg);
+      }
 
       if (entry.trailPolyline && now - entry.trailThrottleTime > 1000) {
         const path = entry.trailPolyline.getPath();

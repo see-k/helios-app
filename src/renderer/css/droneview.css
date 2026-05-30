@@ -26,6 +26,14 @@
   display: none !important;
 }
 
+/* ── 3D Model Drone Marker (custom OverlayView) ── */
+.dv-model-marker model-viewer {
+  --poster-color: transparent;
+}
+.dv-model-marker model-viewer::part(default-progress-bar) {
+  display: none;
+}
+
 /* ── Live Badge (top-left on map) ── */
 .dv-live-badge {
   position: absolute;
