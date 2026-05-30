@@ -289,6 +289,8 @@ export const DroneView = {
       missionStartTime: null,
       missionComplete: false,
       flightLog: [],
+      track: [],            // sampled telemetry for replay: { t, lat, lng, alt, speed, heading, battery }
+      trackSampleTime: 0,
       // Map objects
       droneMarker: null,
       routePolyline: null,
@@ -1214,6 +1216,9 @@ export const DroneView = {
     entry.flightLog = [
       { time: new Date().toISOString(), event: 'launch', detail: 'Drone powered up and launched from base' }
     ];
+    entry.track = [];
+    entry.trackSampleTime = 0;
+    entry._persisted = false;
     if (entry.trailPolyline) entry.trailPolyline.setPath([]);
 
     const stepsPerSegment = 600;
@@ -1263,6 +1268,8 @@ export const DroneView = {
         lat, lng
       };
 
+      this._recordTrackSample(entry, { lat, lng, alt, speed: +baseSpeed.toFixed(1), heading: hdg, battery: batt });
+
       const pos = { lat, lng };
       if (entry.droneMarker) {
         entry.droneMarker.setPosition(pos);
@@ -1300,6 +1307,37 @@ export const DroneView = {
     if (entry.simInterval) {
       clearInterval(entry.simInterval);
       entry.simInterval = null;
+    }
+  },
+
+  // Record a sampled telemetry point for replay (throttled to ~1/sec).
+  _recordTrackSample(entry, { lat, lng, alt, speed, heading, battery }) {
+    if (typeof lat !== 'number' || typeof lng !== 'number') return;
+    const now = Date.now();
+    if (entry.trackSampleTime && now - entry.trackSampleTime < 1000) return;
+    entry.trackSampleTime = now;
+    if (!entry.track) entry.track = [];
+    entry.track.push({
+      t: entry.missionStartTime ? now - entry.missionStartTime : 0,
+      lat,
+      lng,
+      alt: Math.round(alt || 0),
+      speed: +(+speed || 0).toFixed(1),
+      heading: Math.round(heading || 0),
+      battery: Math.round(battery ?? 100)
+    });
+    // Safety cap so very long flights don't grow unbounded (~2h at 1Hz).
+    if (entry.track.length > 7200) entry.track.shift();
+  },
+
+  // Persist a completed/snapshot flight to the local database for history & replay.
+  async _persistFlight(flightData) {
+    try {
+      if (window.helios?.flightSave) {
+        await window.helios.flightSave(flightData);
+      }
+    } catch (err) {
+      console.error('[DroneView] Failed to persist flight:', err);
     }
   },
 
@@ -1353,8 +1391,14 @@ export const DroneView = {
       weatherSummary: this._getDom().weatherCondition?.textContent || 'Unknown',
       flightLog: [...entry.flightLog],
       waypoints: wps.map(w => ({ ...w })),
-      telemetrySnapshot: { ...entry.telemetry }
+      telemetrySnapshot: { ...entry.telemetry },
+      track: (entry.track || []).map(p => ({ ...p }))
     };
+
+    if (!entry._persisted) {
+      entry._persisted = true;
+      this._persistFlight(state.flightData);
+    }
   },
 
   // ══════════════════════════════════════════
@@ -1381,6 +1425,9 @@ export const DroneView = {
         entry.flightLog = [
           { time: new Date().toISOString(), event: 'launch', detail: 'Live telemetry stream started' }
         ];
+        entry.track = [];
+        entry.trackSampleTime = 0;
+        entry._persisted = false;
         if (entry.trailPolyline) entry.trailPolyline.setPath([]);
       };
 
@@ -1495,6 +1542,15 @@ export const DroneView = {
       const pct = data.battery.remaining_percent;
       entry.telemetry.battery = pct > 1 ? Math.round(pct) : Math.round(pct * 100);
     }
+
+    this._recordTrackSample(entry, {
+      lat: entry.telemetry.lat,
+      lng: entry.telemetry.lng,
+      alt: entry.telemetry.altitude,
+      speed: entry.telemetry.speed,
+      heading: entry.telemetry.heading,
+      battery: entry.telemetry.battery
+    });
 
     // Only update panel if active
     if (entry.id === this._activeDroneId) {
@@ -2016,8 +2072,15 @@ RULES:
         weatherSummary: d.weatherCondition?.textContent || 'Unknown',
         flightLog: [...(entry.flightLog || [])],
         waypoints: wps.map(w => ({ ...w })),
-        telemetrySnapshot: { ...t }
+        telemetrySnapshot: { ...t },
+        track: (entry.track || []).map(p => ({ ...p }))
       };
+
+      // Only persist a completed mission once (in-progress reports stay ephemeral).
+      if (entry.missionComplete && !entry._persisted) {
+        entry._persisted = true;
+        this._persistFlight(state.flightData);
+      }
 
       if (_navigate) {
         _navigate('reports');

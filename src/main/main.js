@@ -202,6 +202,12 @@ ipcMain.handle('fleet-update', (event, id, data) => database.updateDrone(id, dat
 ipcMain.handle('fleet-delete', (event, id) => database.deleteDrone(id));
 ipcMain.handle('fleet-ping', (event, id) => database.pingDrone(id));
 
+// ── Flight History IPC ──
+ipcMain.handle('flight-save', (event, data) => database.saveFlight(data));
+ipcMain.handle('flight-get-all', () => database.getAllFlights());
+ipcMain.handle('flight-get', (event, id) => database.getFlightById(id));
+ipcMain.handle('flight-delete', (event, id) => database.deleteFlight(id));
+
 app.whenReady().then(() => {
   database.initDatabase();
   createWindow();
