@@ -1,7 +1,7 @@
 /* ── DroneView Module — Multi-Drone Live Tracking, Simulation & AI Analysis ── */
 import { state } from '../state.js';
 import { getMapStyles, createMarkerIcon, createAiMarkerIcon, createDroneIcon, createDroneOrb3D, haversine, bearing } from '../utils/maps.js';
-import { callGemini, getGeminiApiKey } from '../services/gemini.js';
+import { callAI, getAIProviderLabel } from '../services/ai.js';
 import { weatherCodeToInfo, windDirToCompass } from '../services/weather.js';
 import { loadGoogleMaps } from '../services/maps-loader.js';
 
@@ -213,6 +213,10 @@ export const DroneView = {
   },
 
   async onEnter() {
+    // Update AI provider badge
+    const badge = document.getElementById('dvAiBadge');
+    if (badge) badge.textContent = getAIProviderLabel();
+
     // Restore 3D body class if 3D mode is still active
     if (this._is3DMode) document.body.classList.add('dv-3d-active');
 
@@ -1694,12 +1698,6 @@ export const DroneView = {
     if (!entry) return;
 
     const d = this._getDom();
-    const apiKey = await getGeminiApiKey();
-    if (!apiKey) {
-      this._showError('Gemini API key not configured. Add GEMINI_API_KEY to .env and restart.');
-      return;
-    }
-
     d.btnFlightAnalysis.classList.add('loading');
     d.loadingOverlay.classList.add('visible');
 
@@ -1740,7 +1738,7 @@ Provide a JSON response with EXACTLY this structure (no markdown, no code fences
   "alerts": ["<any urgent alerts, or empty array>"]
 }`;
 
-      const result = await callGemini(apiKey, prompt);
+      const result = await callAI(prompt);
       d.loadingOverlay.classList.remove('visible');
       d.btnFlightAnalysis.classList.remove('loading');
       this._showAnalysisPanel(result);
@@ -1798,12 +1796,6 @@ Provide a JSON response with EXACTLY this structure (no markdown, no code fences
     if (!entry) return;
 
     const d = this._getDom();
-    const apiKey = await getGeminiApiKey();
-    if (!apiKey) {
-      this._showError('Gemini API key not configured. Add GEMINI_API_KEY to .env and restart.');
-      return;
-    }
-
     d.btnAltRoutes.classList.add('loading');
     d.loadingOverlay.classList.add('visible');
 
@@ -1847,7 +1839,7 @@ RULES:
 - 3-5 waypoints per alternative route
 - Altitudes between 30-120m`;
 
-      const result = await callGemini(apiKey, prompt);
+      const result = await callAI(prompt);
       d.loadingOverlay.classList.remove('visible');
       d.btnAltRoutes.classList.remove('loading');
       if (result.alternatives && result.alternatives.length > 0) {

@@ -21,5 +21,9 @@ contextBridge.exposeInMainWorld('helios', {
   fleetAdd: (data) => ipcRenderer.invoke('fleet-add', data),
   fleetUpdate: (id, data) => ipcRenderer.invoke('fleet-update', id, data),
   fleetDelete: (id) => ipcRenderer.invoke('fleet-delete', id),
-  fleetPing: (id) => ipcRenderer.invoke('fleet-ping', id)
+  fleetPing: (id) => ipcRenderer.invoke('fleet-ping', id),
+
+  // Ollama (local AI)
+  ollamaListModels: (baseUrl) => ipcRenderer.invoke('ollama-list-models', baseUrl),
+  ollamaGenerate: (baseUrl, model, prompt) => ipcRenderer.invoke('ollama-generate', baseUrl, model, prompt)
 });

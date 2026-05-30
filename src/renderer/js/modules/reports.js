@@ -1,7 +1,7 @@
 /* ── Reports Module — Post-Flight Report, Charts & AI Assessment ── */
 import { state } from '../state.js';
 import { RptIcons } from '../utils/icons.js';
-import { callGemini, getGeminiApiKey } from '../services/gemini.js';
+import { callAI } from '../services/ai.js';
 
 // ── Injected callback (set via init) ──
 let _navigate = null;
@@ -368,13 +368,6 @@ export const Reports = {
     const btn = d.container.querySelector('#btnGenerateAssessment');
     if (btn) btn.classList.add('loading');
 
-    const apiKey = await getGeminiApiKey();
-    if (!apiKey) {
-      this._showAssessmentError('Gemini API key not available.');
-      if (btn) btn.classList.remove('loading');
-      return;
-    }
-
     const prompt = `You are a senior eVTOL drone flight operations officer. Provide a comprehensive post-flight assessment.
 
 FLIGHT DATA:
@@ -407,7 +400,7 @@ Return JSON only (no markdown, no fences):
 }`;
 
     try {
-      const result = await callGemini(apiKey, prompt);
+      const result = await callAI(prompt);
       this._aiResult = result;
       const aiBody = d.container.querySelector('#rptAiBody');
       if (aiBody) aiBody.innerHTML = this._renderAiAssessment(result);
