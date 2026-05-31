@@ -7,8 +7,83 @@
 .reports-container {
   width: 100%;
   height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: row;
+}
+
+/* ── Left Sidebar (flight history) ── */
+.rpt-sidebar {
+  width: 270px;
+  flex-shrink: 0;
+  height: 100%;
   overflow-y: auto;
-  padding: 32px 100px 60px 40px;
+  border-right: 1px solid var(--glass-border);
+  display: flex;
+  flex-direction: column;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.08) transparent;
+}
+
+.rpt-sidebar::-webkit-scrollbar { width: 4px; }
+.rpt-sidebar::-webkit-scrollbar-track { background: transparent; }
+.rpt-sidebar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 2px; }
+
+/* Sidebar-context history section: borderless, fits flush in panel */
+.rpt-sidebar .rpt-hist-section {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  flex: 1;
+}
+
+.rpt-sidebar .rpt-section-header {
+  border-bottom: 1px solid var(--glass-border);
+  padding: 12px 14px;
+  position: sticky;
+  top: 0;
+  background: var(--bg-primary, #0d0f18);
+  z-index: 1;
+}
+
+.rpt-sidebar .rpt-section-body {
+  padding: 10px 10px;
+}
+
+/* Compact sidebar rows */
+.rpt-sidebar .rpt-hist-row {
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 10px;
+}
+
+.rpt-sidebar .rpt-hist-meta {
+  display: none;
+}
+
+.rpt-sidebar .rpt-hist-actions {
+  width: 100%;
+  justify-content: space-between;
+}
+
+.rpt-sidebar .rpt-hist-open {
+  flex: 1;
+  text-align: center;
+  padding: 5px 10px;
+}
+
+.rpt-sidebar .rpt-hist-empty {
+  font-size: 11px;
+  padding: 12px 4px;
+}
+
+/* ── Main Content Area ── */
+.rpt-main {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  overflow-y: auto;
+  padding: 32px 80px 60px 40px;
   display: flex;
   flex-direction: column;
   gap: 20px;
@@ -16,11 +91,11 @@
   scrollbar-color: rgba(255,255,255,0.08) transparent;
 }
 
-.reports-container::-webkit-scrollbar { width: 6px; }
-.reports-container::-webkit-scrollbar-track { background: transparent; }
-.reports-container::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 3px; }
+.rpt-main::-webkit-scrollbar { width: 6px; }
+.rpt-main::-webkit-scrollbar-track { background: transparent; }
+.rpt-main::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 3px; }
 
-.reports-container > * {
+.rpt-main > * {
   flex-shrink: 0;
 }
 
@@ -983,6 +1058,132 @@
 
 /* ── Print/PDF Styles ── */
 /* ── Flight Replay ── */
+.rpt-replay-section {
+  position: relative;
+}
+
+.rpt-replay-max-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+.rpt-replay-max-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--glass-border-hover);
+  color: var(--text-primary);
+}
+
+.rpt-replay-max-btn:active {
+  transform: scale(0.94);
+}
+
+.rpt-replay-max-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.rpt-replay-modal-open {
+  overflow: hidden;
+}
+
+.rpt-replay-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(var(--titlebar-height) + 18px) 92px 28px 28px;
+  background: rgba(3, 6, 14, 0.64);
+  backdrop-filter: blur(18px) saturate(145%);
+  -webkit-backdrop-filter: blur(18px) saturate(145%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.22s ease;
+}
+
+.rpt-replay-modal-overlay.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.rpt-replay-modal-shell {
+  position: relative;
+  width: min(1180px, calc(100vw - 120px));
+  height: min(820px, calc(100vh - var(--titlebar-height) - 52px));
+  min-height: 520px;
+  overflow: hidden;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.035) 42%, rgba(255, 255, 255, 0.08)),
+    rgba(14, 18, 29, 0.72);
+  backdrop-filter: blur(30px) saturate(180%);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  box-shadow:
+    0 28px 90px rgba(0, 0, 0, 0.48),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.04);
+  transform: translateY(14px) scale(0.985);
+  transition: transform 0.24s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.rpt-replay-modal-shell::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: linear-gradient(115deg, rgba(255, 255, 255, 0.2), transparent 28%, rgba(255, 255, 255, 0.06) 54%, transparent 78%);
+  opacity: 0.58;
+}
+
+.rpt-replay-modal-overlay.visible .rpt-replay-modal-shell {
+  transform: translateY(0) scale(1);
+}
+
+.rpt-replay-modal-shell > .rpt-replay-section {
+  position: relative;
+  z-index: 1;
+}
+
+.rpt-replay-maximized {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  border: none;
+  border-radius: 18px;
+  background: transparent;
+}
+
+.rpt-replay-maximized .rpt-section-header {
+  padding: 16px 20px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.rpt-replay-maximized .rpt-section-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+}
+
 .rpt-replay-map {
   width: 100%;
   height: 280px;
@@ -990,6 +1191,14 @@
   overflow: hidden;
   border: 1px solid var(--glass-border);
   background: rgba(255, 255, 255, 0.02);
+}
+
+.rpt-replay-maximized .rpt-replay-map {
+  flex: 1;
+  height: auto;
+  min-height: 340px;
+  border-radius: 12px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 .rpt-replay-nomap {
@@ -1098,6 +1307,38 @@
   border: 1px solid var(--glass-border);
   color: var(--text-secondary);
   cursor: pointer;
+}
+
+@media (max-width: 850px) {
+  .rpt-replay-modal-overlay {
+    padding: calc(var(--titlebar-height) + 12px) 14px 18px;
+  }
+
+  .rpt-replay-modal-shell {
+    width: 100%;
+    height: calc(100vh - var(--titlebar-height) - 30px);
+    min-height: 0;
+  }
+
+  .rpt-replay-telemetry {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 620px) {
+  .rpt-replay-controls {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .rpt-replay-slider {
+    flex: 1 0 100%;
+    order: 4;
+  }
+
+  .rpt-replay-speed {
+    margin-left: auto;
+  }
 }
 
 /* ── Flight History ── */
@@ -1242,10 +1483,22 @@
   .nav-bar,
   .titlebar,
   .rpt-export-btn,
+  .rpt-replay-max-btn,
+  .rpt-replay-modal-overlay,
   .rpt-ai-generate-btn,
   .rpt-replay-controls { display: none !important; }
 
   .reports-container {
+    overflow: visible !important;
+    height: auto !important;
+    flex-direction: column !important;
+  }
+
+  .rpt-sidebar {
+    display: none !important;
+  }
+
+  .rpt-main {
     padding: 20px !important;
     overflow: visible !important;
     height: auto !important;

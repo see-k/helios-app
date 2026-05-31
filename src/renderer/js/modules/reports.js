@@ -3,6 +3,7 @@ import { state } from '../state.js';
 import { RptIcons } from '../utils/icons.js';
 import { callAI } from '../services/ai.js';
 import { loadGoogleMaps, isMapsLoaded } from '../services/maps-loader.js';
+import { createDroneModelOverlay } from '../utils/drone-model-overlay.js';
 
 // ── Injected callback (set via init) ──
 let _navigate = null;
@@ -71,10 +72,12 @@ export const Reports = {
     const d = this._getDom();
     const fd = state.flightData;
     this._destroyCharts();
+    this._stopReplay();
 
     if (!fd) {
       d.container.innerHTML = `
-        <div id="rptHistoryPanel"></div>
+        <div class="rpt-sidebar"><div id="rptHistoryPanel"></div></div>
+        <div class="rpt-main">
         <div class="rpt-no-data">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48">
             <path d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/>
@@ -84,6 +87,7 @@ export const Reports = {
           <button class="rpt-no-data-btn" id="rptGoToDrone">
             ${RptIcons.drone} Go to Drone View
           </button>
+        </div>
         </div>`;
       d.container.querySelector('#rptGoToDrone')?.addEventListener('click', () => {
         if (_navigate) _navigate('droneview');
@@ -120,7 +124,8 @@ export const Reports = {
     const hasTrack = Array.isArray(fd.track) && fd.track.length > 1;
 
     d.container.innerHTML = `
-      <div id="rptHistoryPanel"></div>
+      <div class="rpt-sidebar"><div id="rptHistoryPanel"></div></div>
+      <div class="rpt-main">
 
       <!-- Header -->
       <div class="rpt-header">
@@ -177,8 +182,13 @@ export const Reports = {
 
       ${hasTrack ? `
       <!-- Flight Replay -->
-      <div class="rpt-section rpt-replay-section">
-        <div class="rpt-section-header">${RptIcons.route}<span class="rpt-section-title">Flight Replay</span><span class="rpt-section-badge">${fd.track.length} samples</span></div>
+      <div class="rpt-section rpt-replay-section" id="rptReplaySection">
+        <div class="rpt-section-header">
+          ${RptIcons.route}
+          <span class="rpt-section-title">Flight Replay</span>
+          <span class="rpt-section-badge">${fd.track.length} samples</span>
+          <button class="rpt-replay-max-btn" id="rptReplayMaximize" type="button" title="Maximize replay" aria-label="Maximize replay" aria-expanded="false">${this._maximizeIcon()}</button>
+        </div>
         <div class="rpt-section-body">
           <div class="rpt-replay-map" id="rptReplayMap"></div>
           <div class="rpt-replay-telemetry" id="rptReplayTelemetry">
@@ -236,6 +246,7 @@ export const Reports = {
             <div class="rpt-ai-btn-spinner"></div>
           </button>`}
         </div></div>
+      </div>
       </div>`;
 
     // Wire events
@@ -664,10 +675,12 @@ Return JSON only (no markdown, no fences):
 
   async _initReplay(fd) {
     const ctr = this._getDom().container;
+    const section = ctr.querySelector('#rptReplaySection');
     const mapEl = ctr.querySelector('#rptReplayMap');
     const slider = ctr.querySelector('#rptReplaySlider');
     const playBtn = ctr.querySelector('#rptReplayPlay');
     const speedSel = ctr.querySelector('#rptReplaySpeed');
+    const maxBtn = ctr.querySelector('#rptReplayMaximize');
     if (!slider || !playBtn) return;
 
     const track = fd.track;
@@ -681,7 +694,8 @@ Return JSON only (no markdown, no fences):
       map: null,
       marker: null,
       polyline: null,
-      el: { mapEl, slider, playBtn, speedSel, ctr }
+      max: null,
+      el: { mapEl, slider, playBtn, speedSel, maxBtn, section, ctr: section || ctr }
     };
     this._replay = r;
 
@@ -705,19 +719,30 @@ Return JSON only (no markdown, no fences):
           strokeWeight: 3,
           map: r.map
         });
-        r.marker = new google.maps.Marker({
-          position: path[0] || center,
-          map: r.map,
-          icon: {
-            path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
-            scale: 5,
-            fillColor: '#3b82f6',
-            fillOpacity: 1,
-            strokeColor: '#fff',
-            strokeWeight: 1.5,
-            rotation: track[0]?.heading || 0
-          }
-        });
+        try {
+          r.marker = createDroneModelOverlay({
+            position: path[0] || center,
+            color: '#3b82f6',
+            title: fd.droneModel || 'Replay drone',
+            size: 72
+          });
+          r.marker.setMap(r.map);
+          r.marker.setHeading(track[0]?.heading || 0);
+        } catch (_) {
+          r.marker = new google.maps.Marker({
+            position: path[0] || center,
+            map: r.map,
+            icon: {
+              path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+              scale: 5,
+              fillColor: '#3b82f6',
+              fillOpacity: 1,
+              strokeColor: '#fff',
+              strokeWeight: 1.5,
+              rotation: track[0]?.heading || 0
+            }
+          });
+        }
         if (path.length > 1) {
           const bounds = new google.maps.LatLngBounds();
           path.forEach(p => bounds.extend(p));
@@ -736,8 +761,106 @@ Return JSON only (no markdown, no fences):
     });
     playBtn.addEventListener('click', () => this._toggleReplay());
     if (speedSel) speedSel.addEventListener('change', () => { r.speed = Number(speedSel.value) || 1; });
+    if (maxBtn) maxBtn.addEventListener('click', () => this._toggleReplayMaximized());
 
     this._seekReplay(0);
+  },
+
+  _toggleReplayMaximized() {
+    const r = this._replay;
+    if (!r) return;
+    if (r.max) {
+      this._closeReplayMaximized();
+    } else {
+      this._openReplayMaximized();
+    }
+  },
+
+  _openReplayMaximized() {
+    const r = this._replay;
+    const section = r?.el?.section;
+    if (!r || !section || r.max || !section.parentNode) return;
+
+    const placeholder = document.createComment('rpt-replay-restore');
+    section.parentNode.insertBefore(placeholder, section);
+
+    const overlay = document.createElement('div');
+    overlay.className = 'rpt-replay-modal-overlay';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-label', 'Maximized flight replay');
+
+    const shell = document.createElement('div');
+    shell.className = 'rpt-replay-modal-shell';
+    overlay.appendChild(shell);
+    document.body.appendChild(overlay);
+    shell.appendChild(section);
+    section.classList.add('rpt-replay-maximized');
+    document.body.classList.add('rpt-replay-modal-open');
+
+    const onOverlayClick = (event) => {
+      if (event.target === overlay) this._closeReplayMaximized();
+    };
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') this._closeReplayMaximized();
+    };
+
+    overlay.addEventListener('click', onOverlayClick);
+    document.addEventListener('keydown', onKeyDown);
+    r.max = { overlay, placeholder, onOverlayClick, onKeyDown };
+
+    this._setReplayMaxButton(true);
+    requestAnimationFrame(() => overlay.classList.add('visible'));
+    this._refreshReplayMap();
+  },
+
+  _closeReplayMaximized() {
+    const r = this._replay;
+    const max = r?.max;
+    if (!r || !max) return;
+
+    const section = r.el.section;
+    document.removeEventListener('keydown', max.onKeyDown);
+    max.overlay.removeEventListener('click', max.onOverlayClick);
+    document.body.classList.remove('rpt-replay-modal-open');
+
+    if (section) {
+      section.classList.remove('rpt-replay-maximized');
+      if (max.placeholder?.parentNode) {
+        max.placeholder.parentNode.insertBefore(section, max.placeholder);
+        max.placeholder.remove();
+      }
+    }
+
+    max.overlay.remove();
+    r.max = null;
+    this._setReplayMaxButton(false);
+    this._refreshReplayMap();
+  },
+
+  _setReplayMaxButton(isMaximized) {
+    const btn = this._replay?.el?.maxBtn;
+    if (!btn) return;
+    btn.innerHTML = isMaximized ? this._minimizeIcon() : this._maximizeIcon();
+    btn.title = isMaximized ? 'Restore replay' : 'Maximize replay';
+    btn.setAttribute('aria-label', isMaximized ? 'Restore replay' : 'Maximize replay');
+    btn.setAttribute('aria-expanded', String(isMaximized));
+  },
+
+  _refreshReplayMap() {
+    const r = this._replay;
+    if (!r?.map) return;
+
+    const refresh = () => {
+      const center = r.marker?.getPosition?.() || r.map.getCenter?.();
+      if (window.google?.maps?.event) {
+        google.maps.event.trigger(r.map, 'resize');
+      }
+      if (center) r.map.setCenter(center);
+    };
+
+    requestAnimationFrame(refresh);
+    setTimeout(refresh, 260);
   },
 
   _toggleReplay() {
@@ -746,6 +869,7 @@ Return JSON only (no markdown, no fences):
     if (r.playing) { this._pauseReplay(); return; }
     // Restart if at the end
     if (r.index >= r.track.length - 1) this._seekReplay(0);
+    r.virtualT = r.track[r.index]?.t ?? 0;
     r.playing = true;
     r.lastTs = 0;
     if (r.el.playBtn) r.el.playBtn.innerHTML = this._pauseIcon();
@@ -763,14 +887,14 @@ Return JSON only (no markdown, no fences):
   _replayStep(ts) {
     const r = this._replay;
     if (!r || !r.playing) return;
-    if (!r.lastTs) r.lastTs = ts;
+    if (!r.lastTs) { r.lastTs = ts; r.rafId = requestAnimationFrame((t) => this._replayStep(t)); return; }
     const deltaMs = (ts - r.lastTs) * r.speed;
     r.lastTs = ts;
+    r.virtualT = (r.virtualT ?? r.track[r.index]?.t ?? 0) + deltaMs;
 
     const track = r.track;
     let idx = r.index;
-    const targetT = (track[idx]?.t || 0) + deltaMs;
-    while (idx < track.length - 1 && (track[idx + 1]?.t || 0) <= targetT) idx++;
+    while (idx < track.length - 1 && (track[idx + 1]?.t ?? 0) <= r.virtualT) idx++;
 
     this._seekReplay(idx, false);
 
@@ -787,6 +911,9 @@ Return JSON only (no markdown, no fences):
     const track = r.track;
     index = Math.max(0, Math.min(index, track.length - 1));
     r.index = index;
+    if (updateSlider) {
+      r.virtualT = track[index]?.t ?? 0;
+    }
     const p = track[index];
     if (!p) return;
 
@@ -797,8 +924,12 @@ Return JSON only (no markdown, no fences):
       const pos = { lat: p.lat, lng: p.lng };
       r.marker.setPosition(pos);
       if (typeof p.heading === 'number') {
-        const icon = r.marker.getIcon();
-        if (icon && typeof icon === 'object') { icon.rotation = p.heading; r.marker.setIcon(icon); }
+        if (typeof r.marker.setHeading === 'function') {
+          r.marker.setHeading(p.heading);
+        } else if (typeof r.marker.getIcon === 'function' && typeof r.marker.setIcon === 'function') {
+          const icon = r.marker.getIcon();
+          if (icon && typeof icon === 'object') { icon.rotation = p.heading; r.marker.setIcon(icon); }
+        }
       }
     }
 
@@ -821,6 +952,7 @@ Return JSON only (no markdown, no fences):
   _stopReplay() {
     const r = this._replay;
     if (r) {
+      this._closeReplayMaximized();
       if (r.rafId) cancelAnimationFrame(r.rafId);
       if (r.marker) r.marker.setMap(null);
       if (r.polyline) r.polyline.setMap(null);
@@ -834,6 +966,14 @@ Return JSON only (no markdown, no fences):
 
   _pauseIcon() {
     return '<svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>';
+  },
+
+  _maximizeIcon() {
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="16" height="16"><path d="M8 3H5a2 2 0 00-2 2v3M16 3h3a2 2 0 012 2v3M21 16v3a2 2 0 01-2 2h-3M8 21H5a2 2 0 01-2-2v-3"/></svg>';
+  },
+
+  _minimizeIcon() {
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="16" height="16"><path d="M9 3v4a2 2 0 01-2 2H3M15 3v4a2 2 0 002 2h4M21 15h-4a2 2 0 00-2 2v4M3 15h4a2 2 0 012 2v4"/></svg>';
   },
 
   // ── Formatters ──
