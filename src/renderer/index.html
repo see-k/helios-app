@@ -614,13 +614,134 @@
             </svg>
             <span>Follow</span>
           </button>
-
-          <!-- Add Drone Button (floating on map) -->
-          <button class="dv-add-drone-btn" id="dvAddDroneBtn" title="Add another drone">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
-              <path d="M12 4.5v15m7.5-7.5h-15"/>
+          <button class="dv-complete-mission-btn dv-map-controls" id="dvCompleteMissionBtn" title="Mark mission complete" aria-label="Mark mission complete">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="16" height="16">
+              <path d="M9 12.75L11.25 15 15 9.75"/>
+              <path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
             </svg>
           </button>
+
+          <!-- Realtime Graph Board (bottom drawer) -->
+          <div class="dv-graphs-drawer" id="dvGraphsDrawer">
+            <button class="dv-graphs-flap" id="dvGraphsFlap" type="button" aria-expanded="false" title="Show telemetry graphs">
+              <span class="dv-graphs-grip"></span>
+              <span class="dv-graphs-flap-label">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" width="15" height="15">
+                  <path d="M3 3v18h18"/>
+                  <path d="M7 15l3-4 3 2 4-7"/>
+                </svg>
+                Telemetry Graphs
+              </span>
+              <span class="dv-graphs-flap-meta" id="dvGraphsMeta">0 samples</span>
+            </button>
+            <div class="dv-graphs-panel">
+              <div class="dv-graphs-header">
+                <div class="dv-graphs-heading">
+                  <div class="dv-graphs-title-row">
+                    <span class="dv-graphs-kicker">Operations Telemetry</span>
+                    <span class="dv-graphs-live-pill"><span></span>Realtime</span>
+                  </div>
+                  <h3>Telemetry Command Board</h3>
+                  <p id="dvGraphsSubtitle">Live telemetry history for the selected drone</p>
+                </div>
+                <div class="dv-graphs-stats">
+                  <div class="dv-graphs-stat">
+                    <span>Samples</span>
+                    <strong id="dvGraphsSampleCount">0</strong>
+                  </div>
+                  <div class="dv-graphs-stat">
+                    <span>Window</span>
+                    <strong id="dvGraphsWindow">00:00</strong>
+                  </div>
+                  <div class="dv-graphs-stat">
+                    <span>Widgets</span>
+                    <strong id="dvGraphsActiveCount">4</strong>
+                  </div>
+                </div>
+                <div class="dv-graphs-actions">
+                  <button class="dv-graphs-tool-btn" id="dvGraphsRawBtn" type="button" title="View raw stream logs" aria-pressed="false">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="15" height="15">
+                      <path d="M4 17l6-6-6-6"/>
+                      <path d="M12 19h8"/>
+                    </svg>
+                  </button>
+                  <button class="dv-graphs-tool-btn" id="dvGraphsWidgetBtn" type="button" title="Choose graph widgets" aria-expanded="false">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="15" height="15">
+                      <path d="M12 3v18M3 12h18"/>
+                    </svg>
+                  </button>
+                  <div class="dv-graphs-widget-menu" id="dvGraphsWidgetMenu">
+                    <label><input type="checkbox" data-graph-toggle="altitude" checked> Altitude</label>
+                    <label><input type="checkbox" data-graph-toggle="speed" checked> Speed</label>
+                    <label><input type="checkbox" data-graph-toggle="battery" checked> Battery</label>
+                    <label><input type="checkbox" data-graph-toggle="heading" checked> Heading</label>
+                    <label><input type="checkbox" data-graph-toggle="verticalRate"> Vertical Rate</label>
+                    <label><input type="checkbox" data-graph-toggle="distance"> Distance</label>
+                  </div>
+                </div>
+              </div>
+              <div class="dv-graphs-grid" id="dvGraphsGrid">
+                <div class="dv-graph-card" data-graph-widget="altitude">
+                  <div class="dv-graph-card-header">
+                    <div class="dv-graph-card-title"><span class="dv-graph-dot"></span><span>Altitude</span><small>AGL trend</small></div>
+                    <strong data-graph-value="altitude">-- m</strong>
+                  </div>
+                  <div class="dv-graph-card-meta"><span>Last 160 samples</span><span data-graph-delta="altitude">No change</span></div>
+                  <div class="dv-graph-canvas-wrap"><canvas id="dvGraphAltitude"></canvas></div>
+                </div>
+                <div class="dv-graph-card" data-graph-widget="speed">
+                  <div class="dv-graph-card-header">
+                    <div class="dv-graph-card-title"><span class="dv-graph-dot"></span><span>Speed</span><small>Ground speed</small></div>
+                    <strong data-graph-value="speed">-- km/h</strong>
+                  </div>
+                  <div class="dv-graph-card-meta"><span>Last 160 samples</span><span data-graph-delta="speed">No change</span></div>
+                  <div class="dv-graph-canvas-wrap"><canvas id="dvGraphSpeed"></canvas></div>
+                </div>
+                <div class="dv-graph-card" data-graph-widget="battery">
+                  <div class="dv-graph-card-header">
+                    <div class="dv-graph-card-title"><span class="dv-graph-dot"></span><span>Battery</span><small>Remaining charge</small></div>
+                    <strong data-graph-value="battery">--%</strong>
+                  </div>
+                  <div class="dv-graph-card-meta"><span>Last 160 samples</span><span data-graph-delta="battery">No change</span></div>
+                  <div class="dv-graph-canvas-wrap"><canvas id="dvGraphBattery"></canvas></div>
+                </div>
+                <div class="dv-graph-card" data-graph-widget="heading">
+                  <div class="dv-graph-card-header">
+                    <div class="dv-graph-card-title"><span class="dv-graph-dot"></span><span>Heading</span><small>Yaw direction</small></div>
+                    <strong data-graph-value="heading">--°</strong>
+                  </div>
+                  <div class="dv-graph-card-meta"><span>Last 160 samples</span><span data-graph-delta="heading">No change</span></div>
+                  <div class="dv-graph-canvas-wrap"><canvas id="dvGraphHeading"></canvas></div>
+                </div>
+                <div class="dv-graph-card" data-graph-widget="verticalRate">
+                  <div class="dv-graph-card-header">
+                    <div class="dv-graph-card-title"><span class="dv-graph-dot"></span><span>Vertical Rate</span><small>Climb / descent</small></div>
+                    <strong data-graph-value="verticalRate">-- m/s</strong>
+                  </div>
+                  <div class="dv-graph-card-meta"><span>Last 160 samples</span><span data-graph-delta="verticalRate">No change</span></div>
+                  <div class="dv-graph-canvas-wrap"><canvas id="dvGraphVerticalRate"></canvas></div>
+                </div>
+                <div class="dv-graph-card" data-graph-widget="distance">
+                  <div class="dv-graph-card-header">
+                    <div class="dv-graph-card-title"><span class="dv-graph-dot"></span><span>Distance</span><small>Track distance</small></div>
+                    <strong data-graph-value="distance">-- m</strong>
+                  </div>
+                  <div class="dv-graph-card-meta"><span>Last 160 samples</span><span data-graph-delta="distance">No change</span></div>
+                  <div class="dv-graph-canvas-wrap"><canvas id="dvGraphDistance"></canvas></div>
+                </div>
+              </div>
+              <div class="dv-raw-stream-panel hidden" id="dvRawStreamPanel">
+                <div class="dv-raw-stream-toolbar">
+                  <div>
+                    <span class="dv-raw-stream-label">Raw Stream Console</span>
+                    <strong id="dvRawStreamMeta">0 entries</strong>
+                  </div>
+                  <button class="dv-raw-stream-clear" id="dvRawStreamClear" type="button">Clear</button>
+                </div>
+                <div class="dv-raw-stream-log" id="dvRawStreamLog">No stream logs captured yet.</div>
+              </div>
+            </div>
+          </div>
 
           <!-- Live Badge -->
           <div class="dv-live-badge">
@@ -665,7 +786,7 @@
                 </svg>
               </div>
               <h2 class="dv-mc-title">Mission Complete</h2>
-              <p class="dv-mc-subtitle">The drone has successfully returned to the launch point. All waypoints were visited.</p>
+              <p class="dv-mc-subtitle">The mission has ended. You can restart tracking or open the flight report.</p>
               <div class="dv-mc-stats">
                 <div class="dv-mc-stat">
                   <span class="dv-mc-stat-value" id="dvMcDuration">--</span>
@@ -728,11 +849,18 @@
               <h2>Flight Data</h2>
               <p>Live telemetry feed</p>
             </div>
-            <button class="dv-collapse-btn" id="btnCollapseTelemetry" title="Collapse panel">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
-                <path d="M15 19l-7-7 7-7"/>
-              </svg>
-            </button>
+            <div class="dv-panel-header-actions">
+              <button class="dv-panel-add-drone-btn" id="dvAddDroneBtn" title="Add another drone" aria-label="Add another drone">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                  <path d="M12 4.5v15m7.5-7.5h-15"/>
+                </svg>
+              </button>
+              <button class="dv-collapse-btn" id="btnCollapseTelemetry" title="Collapse panel">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                  <path d="M15 19l-7-7 7-7"/>
+                </svg>
+              </button>
+            </div>
           </div>
           <!-- Mission Progress -->
           <div class="dv-progress-section">
