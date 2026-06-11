@@ -1,7 +1,7 @@
 /* ── Missions Module — Google Maps + Waypoint System + AI Route Planning ── */
 import { state } from '../state.js';
 import { getMapStyles, createMarkerIcon, createAiMarkerIcon, haversine } from '../utils/maps.js';
-import { callGemini, getGeminiApiKey } from '../services/gemini.js';
+import { callAI } from '../services/ai.js';
 import { fetchWeather, weatherCodeToInfo, windDirToCompass } from '../services/weather.js';
 import { loadGoogleMaps } from '../services/maps-loader.js';
 
@@ -502,13 +502,8 @@ export const Missions = {
     }
   },
 
-  // ── Gemini AI (mission-specific prompt) ──
+  // ── AI (mission-specific prompt) ──
   async _callGeminiAI(mission) {
-    const apiKey = await getGeminiApiKey();
-    if (!apiKey || apiKey === 'YOUR_GEMINI_API_KEY_HERE') {
-      throw new Error('Gemini API key not configured. Add your GEMINI_API_KEY to the .env file and restart the app.');
-    }
-
     const typeDefaults = {
       'quadcopter':  { maxAltitude: 120, maxSpeed: 55, maxFlightTime: 30, maxPayload: 5 },
       'hexacopter':  { maxAltitude: 120, maxSpeed: 50, maxFlightTime: 28, maxPayload: 8 },
@@ -609,7 +604,7 @@ ${modeConfig.rules}
 - Be concise but thorough in the briefing
 - Explain how your route achieves the ${mission.optimizationMode} optimization goal`;
 
-    return callGemini(apiKey, prompt);
+    return callAI(prompt);
   },
 
   // ── AI Route Display on Map ──

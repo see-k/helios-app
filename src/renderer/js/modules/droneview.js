@@ -1,7 +1,8 @@
 /* ── DroneView Module — Multi-Drone Live Tracking, Simulation & AI Analysis ── */
 import { state } from '../state.js';
 import { getMapStyles, createMarkerIcon, createAiMarkerIcon, createDroneIcon, createDroneOrb3D, haversine, bearing } from '../utils/maps.js';
-import { callGemini, getGeminiApiKey } from '../services/gemini.js';
+import { createDroneModelOverlay } from '../utils/drone-model-overlay.js';
+import { callAI, getAIProviderLabel } from '../services/ai.js';
 import { weatherCodeToInfo, windDirToCompass } from '../services/weather.js';
 import { loadGoogleMaps } from '../services/maps-loader.js';
 
@@ -42,6 +43,17 @@ const DEMO_ROUTES = [
 const DEMO_NAMES = ['Demo Alpha', 'Demo Bravo', 'Demo Charlie'];
 const DEMO_MODELS = ['Helios X1 — Recon', 'Helios X2 — Surveyor', 'Helios X3 — Scout'];
 const MAX_DEMO_DRONES = 3;
+const GRAPH_STORAGE_KEY = 'helios.droneview.graphWidgets';
+const RAW_STREAM_LOG_LIMIT = 400;
+const DEFAULT_GRAPH_WIDGETS = ['altitude', 'speed', 'battery', 'heading'];
+const GRAPH_WIDGETS = {
+  altitude: { canvasId: 'dvGraphAltitude', label: 'Altitude', unit: 'm', color: '#60a5fa', suggestedMin: 0 },
+  speed: { canvasId: 'dvGraphSpeed', label: 'Speed', unit: 'km/h', color: '#22c55e', suggestedMin: 0 },
+  battery: { canvasId: 'dvGraphBattery', label: 'Battery', unit: '%', color: '#f59e0b', min: 0, max: 100 },
+  heading: { canvasId: 'dvGraphHeading', label: 'Heading', unit: 'deg', color: '#a78bfa', min: 0, max: 360 },
+  verticalRate: { canvasId: 'dvGraphVerticalRate', label: 'Vertical Rate', unit: 'm/s', color: '#38bdf8' },
+  distance: { canvasId: 'dvGraphDistance', label: 'Distance', unit: 'm', color: '#f472b6', suggestedMin: 0 }
+};
 
 export const DroneView = {
   // ── Shared map state ──
@@ -69,6 +81,12 @@ export const DroneView = {
   _drones: new Map(),
   _activeDroneId: null, // key of drone whose data is in the left panel
   _nextDemoIndex: 0,
+  _graphCharts: new Map(),
+  _visibleGraphWidgets: new Set(DEFAULT_GRAPH_WIDGETS),
+  _graphsOpen: false,
+  _graphsDrag: null,
+  _graphsMode: 'charts',
+  _rawLogRenderFrame: null,
 
   // ══════════════════════════════════════════
   //  DOM CACHE
@@ -97,6 +115,22 @@ export const DroneView = {
       dv3DSelector: document.getElementById('dv3DSelector'),
       dv3DDropdown: document.getElementById('dv3DDropdown'),
       dvBtnFollowToggle: document.getElementById('dvBtnFollowToggle'),
+      btnCompleteMission: document.getElementById('dvCompleteMissionBtn'),
+      graphsDrawer: document.getElementById('dvGraphsDrawer'),
+      graphsFlap: document.getElementById('dvGraphsFlap'),
+      graphsMeta: document.getElementById('dvGraphsMeta'),
+      graphsSubtitle: document.getElementById('dvGraphsSubtitle'),
+      graphsSampleCount: document.getElementById('dvGraphsSampleCount'),
+      graphsWindow: document.getElementById('dvGraphsWindow'),
+      graphsActiveCount: document.getElementById('dvGraphsActiveCount'),
+      graphsRawBtn: document.getElementById('dvGraphsRawBtn'),
+      graphsWidgetBtn: document.getElementById('dvGraphsWidgetBtn'),
+      graphsWidgetMenu: document.getElementById('dvGraphsWidgetMenu'),
+      graphsGrid: document.getElementById('dvGraphsGrid'),
+      rawStreamPanel: document.getElementById('dvRawStreamPanel'),
+      rawStreamLog: document.getElementById('dvRawStreamLog'),
+      rawStreamMeta: document.getElementById('dvRawStreamMeta'),
+      rawStreamClear: document.getElementById('dvRawStreamClear'),
       // Telemetry
       altitude: document.getElementById('dvAltitude'),
       speed: document.getElementById('dvSpeed'),
@@ -186,6 +220,8 @@ export const DroneView = {
     // Close dropdown when clicking elsewhere
     document.addEventListener('click', () => d.dv3DSelector?.classList.remove('open'));
     d.dvBtnFollowToggle?.addEventListener('click', () => this._toggleFollowDrone());
+    d.btnCompleteMission?.addEventListener('click', () => this._markMissionCompleteFromControl());
+    this._initGraphsDrawer();
 
     d.btnFlightAnalysis?.addEventListener('click', () => this._requestFlightAnalysis());
     d.btnAltRoutes?.addEventListener('click', () => this._requestAltRoutes());
@@ -204,15 +240,15 @@ export const DroneView = {
       this._generateReportForActiveDrone();
     });
     d.btnRestartMission?.addEventListener('click', () => {
-      d.missionCompleteOverlay.classList.remove('visible');
-      const entry = this._getActiveDrone();
-      if (entry && entry.mode === 'demo') {
-        this._startSimulation(entry);
-      }
+      this._restartMissionForActiveDrone();
     });
   },
 
   async onEnter() {
+    // Update AI provider badge
+    const badge = document.getElementById('dvAiBadge');
+    if (badge) badge.textContent = getAIProviderLabel();
+
     // Restore 3D body class if 3D mode is still active
     if (this._is3DMode) document.body.classList.add('dv-3d-active');
 
@@ -227,6 +263,8 @@ export const DroneView = {
         google.maps.event.trigger(this._map, 'resize');
       }
     }
+    this._updateMissionCompleteControl(this._getActiveDrone());
+    this._updateGraphs(this._getActiveDrone());
   },
 
   onLeave() {
@@ -284,6 +322,9 @@ export const DroneView = {
       missionStartTime: null,
       missionComplete: false,
       flightLog: [],
+      track: [],            // sampled telemetry for replay: { t, lat, lng, alt, speed, heading, battery }
+      trackSampleTime: 0,
+      rawStreamLog: [],
       // Map objects
       droneMarker: null,
       routePolyline: null,
@@ -874,19 +915,15 @@ export const DroneView = {
     // Waypoint markers
     this._rebuildWaypointMarkers(entry);
 
-    // Drone marker
+    // Drone marker — custom <model-viewer> overlay rendering the helios.glb 3D model
     const launch = entry.waypoints[0] || { lat: entry.telemetry.lat || 37.7749, lng: entry.telemetry.lng || -122.4194 };
-    entry.droneMarker = new google.maps.Marker({
+    entry.droneMarker = createDroneModelOverlay({
       position: { lat: launch.lat, lng: launch.lng },
-      map: this._map,
-      icon: {
-        url: createDroneIcon(entry.color),
-        scaledSize: new google.maps.Size(40, 40),
-        anchor: new google.maps.Point(20, 20)
-      },
+      color: entry.color,
       title: `${entry.name}${entry.model ? ' — ' + entry.model : ''}`,
-      zIndex: 1000
+      size: 72
     });
+    entry.droneMarker.setMap(this._map);
 
     // Click on drone marker -> select this drone
     entry.droneMarker.addListener('click', () => {
@@ -1079,6 +1116,654 @@ export const DroneView = {
     }
   },
 
+  _updateMissionCompleteControl(entry = this._getActiveDrone()) {
+    const btn = this._getDom().btnCompleteMission;
+    if (!btn) return;
+    const disabled = !entry || entry.missionComplete;
+    btn.disabled = disabled;
+    btn.classList.toggle('completed', !!entry?.missionComplete);
+    btn.title = entry?.missionComplete ? 'Mission already complete' : 'Mark mission complete';
+    btn.setAttribute('aria-label', btn.title);
+  },
+
+  _markMissionCompleteFromControl() {
+    const entry = this._getActiveDrone();
+    if (!entry) {
+      this._showError('No active drone selected.');
+      return;
+    }
+    if (entry.missionComplete) {
+      this._showMissionCompleteOverlay(entry, this._buildFlightSnapshot(entry, { status: 'complete' }));
+      return;
+    }
+    this._completeMission(entry, { source: 'manual' });
+  },
+
+  _restartMissionForActiveDrone() {
+    const d = this._getDom();
+    d.missionCompleteOverlay?.classList.remove('visible');
+
+    const entry = this._getActiveDrone();
+    if (!entry) return;
+
+    entry.missionComplete = false;
+    entry._persisted = false;
+    entry.flightLog = [];
+    entry.track = [];
+    entry.trackSampleTime = 0;
+    entry.rawStreamLog = [];
+    entry.missionStartTime = null;
+    entry.visitedWaypoints?.clear?.();
+    entry.mapCenteredOnLive = false;
+
+    if (entry.trailPolyline) entry.trailPolyline.setPath([]);
+    this._updateMissionCompleteControl(entry);
+    this._updateGraphs(entry);
+
+    if (entry.mode === 'demo') {
+      this._applyDroneWaypointsToMap(entry, { restart: true });
+      return;
+    }
+
+    entry.missionStartTime = Date.now();
+    entry.flightLog.push({ time: new Date().toISOString(), event: 'launch', detail: 'Live mission tracking restarted' });
+    this._connectWebSocket(entry);
+    this._updateProgress(entry);
+    this._updateWaypointStatuses(entry);
+  },
+
+  _initGraphsDrawer() {
+    const d = this._getDom();
+    if (!d.graphsDrawer || !d.graphsFlap) return;
+
+    this._visibleGraphWidgets = this._loadGraphWidgetPrefs();
+    d.graphsWidgetMenu?.querySelectorAll('[data-graph-toggle]').forEach(input => {
+      input.checked = this._visibleGraphWidgets.has(input.dataset.graphToggle);
+      input.addEventListener('change', () => {
+        const id = input.dataset.graphToggle;
+        if (input.checked) this._visibleGraphWidgets.add(id);
+        else this._visibleGraphWidgets.delete(id);
+        if (this._visibleGraphWidgets.size === 0) {
+          this._visibleGraphWidgets.add(id);
+          input.checked = true;
+        }
+        this._syncGraphWidgetVisibility();
+        this._updateGraphs(this._getActiveDrone());
+      });
+    });
+
+    d.graphsWidgetBtn?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const open = !d.graphsWidgetMenu.classList.contains('visible');
+      d.graphsWidgetMenu.classList.toggle('visible', open);
+      d.graphsWidgetBtn.setAttribute('aria-expanded', String(open));
+    });
+    d.graphsRawBtn?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      this._setGraphsMode(this._graphsMode === 'raw' ? 'charts' : 'raw');
+    });
+    d.rawStreamClear?.addEventListener('click', () => {
+      const entry = this._getActiveDrone();
+      if (entry) entry.rawStreamLog = [];
+      this._renderRawStreamLog(entry);
+    });
+
+    document.addEventListener('click', (event) => {
+      if (!d.graphsWidgetMenu?.classList.contains('visible')) return;
+      if (event.target.closest('#dvGraphsWidgetMenu') || event.target.closest('#dvGraphsWidgetBtn')) return;
+      d.graphsWidgetMenu.classList.remove('visible');
+      d.graphsWidgetBtn?.setAttribute('aria-expanded', 'false');
+    });
+
+    d.graphsFlap.addEventListener('click', () => {
+      if (this._graphsSuppressClick) return;
+      this._setGraphsOpen(!this._graphsOpen);
+    });
+    d.graphsFlap.addEventListener('pointerdown', (event) => this._startGraphsDrag(event));
+    window.addEventListener('pointermove', (event) => this._moveGraphsDrag(event));
+    window.addEventListener('pointerup', (event) => this._endGraphsDrag(event));
+
+    this._syncGraphWidgetVisibility();
+    this._setGraphsMode(this._graphsMode);
+  },
+
+  _loadGraphWidgetPrefs() {
+    try {
+      const raw = window.localStorage?.getItem(GRAPH_STORAGE_KEY);
+      const ids = raw ? JSON.parse(raw) : DEFAULT_GRAPH_WIDGETS;
+      const valid = ids.filter(id => GRAPH_WIDGETS[id]);
+      return new Set(valid.length ? valid : DEFAULT_GRAPH_WIDGETS);
+    } catch (_) {
+      return new Set(DEFAULT_GRAPH_WIDGETS);
+    }
+  },
+
+  _saveGraphWidgetPrefs() {
+    try {
+      window.localStorage?.setItem(GRAPH_STORAGE_KEY, JSON.stringify([...this._visibleGraphWidgets]));
+    } catch (_) {}
+  },
+
+  _syncGraphWidgetVisibility() {
+    const d = this._getDom();
+    d.graphsGrid?.querySelectorAll('[data-graph-widget]').forEach(card => {
+      card.classList.toggle('hidden', !this._visibleGraphWidgets.has(card.dataset.graphWidget));
+    });
+    d.graphsWidgetMenu?.querySelectorAll('[data-graph-toggle]').forEach(input => {
+      input.checked = this._visibleGraphWidgets.has(input.dataset.graphToggle);
+    });
+    if (d.graphsActiveCount) d.graphsActiveCount.textContent = String(this._visibleGraphWidgets.size);
+    this._saveGraphWidgetPrefs();
+  },
+
+  _setGraphsMode(mode) {
+    const d = this._getDom();
+    this._graphsMode = mode === 'raw' ? 'raw' : 'charts';
+    const raw = this._graphsMode === 'raw';
+    d.graphsGrid?.classList.toggle('hidden', raw);
+    d.rawStreamPanel?.classList.toggle('hidden', !raw);
+    d.graphsRawBtn?.classList.toggle('active', raw);
+    d.graphsRawBtn?.setAttribute('aria-pressed', String(raw));
+    d.graphsWidgetBtn?.classList.toggle('hidden', raw);
+    d.graphsWidgetMenu?.classList.remove('visible');
+    d.graphsWidgetBtn?.setAttribute('aria-expanded', 'false');
+
+    if (raw) {
+      this._renderRawStreamLog(this._getActiveDrone());
+    } else {
+      this._updateGraphs(this._getActiveDrone());
+      requestAnimationFrame(() => this._graphCharts.forEach(chart => chart.resize()));
+    }
+  },
+
+  _setGraphsOpen(open) {
+    const d = this._getDom();
+    if (!d.graphsDrawer) return;
+    this._graphsOpen = open;
+    d.graphsDrawer.classList.toggle('open', open);
+    d.graphsFlap?.setAttribute('aria-expanded', String(open));
+    d.graphsFlap?.setAttribute('title', open ? 'Hide telemetry graphs' : 'Show telemetry graphs');
+    d.graphsDrawer.style.transform = '';
+    if (open) {
+      this._updateGraphs(this._getActiveDrone());
+      if (this._graphsMode === 'raw') this._renderRawStreamLog(this._getActiveDrone());
+      requestAnimationFrame(() => {
+        this._graphCharts.forEach(chart => chart.resize());
+      });
+    }
+  },
+
+  _getGraphsCollapsedShift() {
+    const drawer = this._getDom().graphsDrawer;
+    if (!drawer) return 0;
+    return Math.max(0, drawer.offsetHeight - 46);
+  },
+
+  _startGraphsDrag(event) {
+    if (event.button != null && event.button !== 0) return;
+    const d = this._getDom();
+    if (!d.graphsDrawer) return;
+    const collapsedShift = this._getGraphsCollapsedShift();
+    this._graphsDrag = {
+      pointerId: event.pointerId,
+      startY: event.clientY,
+      startShift: this._graphsOpen ? 0 : collapsedShift,
+      currentShift: this._graphsOpen ? 0 : collapsedShift,
+      collapsedShift,
+      moved: false
+    };
+    d.graphsDrawer.classList.add('dragging');
+    d.graphsFlap?.setPointerCapture?.(event.pointerId);
+  },
+
+  _moveGraphsDrag(event) {
+    const drag = this._graphsDrag;
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    const d = this._getDom();
+    const delta = event.clientY - drag.startY;
+    const shift = Math.max(0, Math.min(drag.collapsedShift, drag.startShift + delta));
+    drag.currentShift = shift;
+    if (Math.abs(delta) > 3) drag.moved = true;
+    d.graphsDrawer.style.transform = `translateY(${shift}px)`;
+    event.preventDefault();
+  },
+
+  _endGraphsDrag(event) {
+    const drag = this._graphsDrag;
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    const d = this._getDom();
+    d.graphsDrawer?.classList.remove('dragging');
+    d.graphsFlap?.releasePointerCapture?.(event.pointerId);
+    this._graphsDrag = null;
+    if (drag.moved) {
+      this._graphsSuppressClick = true;
+      setTimeout(() => { this._graphsSuppressClick = false; }, 0);
+      this._setGraphsOpen(drag.currentShift < drag.collapsedShift * 0.58);
+    }
+  },
+
+  _fmtElapsed(ms) {
+    const total = Math.max(0, Math.floor((ms || 0) / 1000));
+    const minutes = Math.floor(total / 60);
+    const seconds = total % 60;
+    return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  },
+
+  _appendRawStreamLog(entry, channel, payload) {
+    if (!entry) return;
+    if (!Array.isArray(entry.rawStreamLog)) entry.rawStreamLog = [];
+    entry.rawStreamLog.push({
+      time: Date.now(),
+      channel,
+      payload
+    });
+    if (entry.rawStreamLog.length > RAW_STREAM_LOG_LIMIT) {
+      entry.rawStreamLog.splice(0, entry.rawStreamLog.length - RAW_STREAM_LOG_LIMIT);
+    }
+    if (entry.id === this._activeDroneId) this._scheduleRawStreamRender();
+  },
+
+  _formatRawPayloadValue(value) {
+    if (value == null) return String(value);
+    if (typeof value === 'number') {
+      if (!Number.isFinite(value)) return String(value);
+      if (Number.isInteger(value)) return String(value);
+      return value.toFixed(Math.abs(value) < 1 ? 6 : 3).replace(/0+$/, '').replace(/\.$/, '');
+    }
+    if (typeof value === 'boolean') return value ? 'true' : 'false';
+    if (typeof value === 'string') return value;
+    try {
+      return JSON.stringify(value);
+    } catch (_) {
+      return String(value);
+    }
+  },
+
+  _flattenRawPayload(value, prefix = '', out = []) {
+    if (out.length >= 36 || value == null) return out;
+    if (typeof value !== 'object' || Array.isArray(value)) {
+      out.push([prefix || 'value', this._formatRawPayloadValue(value)]);
+      return out;
+    }
+
+    Object.entries(value).forEach(([key, child]) => {
+      if (out.length >= 36) return;
+      const path = prefix ? `${prefix}.${key}` : key;
+      if (child && typeof child === 'object' && !Array.isArray(child)) {
+        this._flattenRawPayload(child, path, out);
+      } else {
+        out.push([path, this._formatRawPayloadValue(child)]);
+      }
+    });
+    return out;
+  },
+
+  _getRawStreamPresentation(item) {
+    const payload = item.payload || {};
+    const metrics = [];
+    const addMetric = (label, value) => {
+      if (value == null || value === '' || Number.isNaN(value)) return;
+      metrics.push([label, value]);
+    };
+
+    if (item.channel === 'demo.telemetry') {
+      addMetric('Alt', `${Math.round(payload.altitude || 0)} m`);
+      addMetric('Speed', `${Number(payload.speed || 0).toFixed(1)} km/h`);
+      addMetric('Battery', `${Math.round(payload.battery ?? 0)}%`);
+      addMetric('Heading', `${Math.round(payload.heading || 0)}°`);
+      addMetric('Lat', this._formatRawPayloadValue(payload.lat));
+      addMetric('Lng', this._formatRawPayloadValue(payload.lng));
+      return { title: 'Demo telemetry sample', metrics };
+    }
+
+    if (item.channel === 'ws.message') {
+      const position = payload.position || {};
+      const attitude = payload.attitude || {};
+      const battery = payload.battery || {};
+      addMetric('Alt', position.relative_altitude_m != null ? `${Math.round(position.relative_altitude_m)} m` : null);
+      addMetric('Lat', position.latitude_deg != null ? this._formatRawPayloadValue(position.latitude_deg) : null);
+      addMetric('Lng', position.longitude_deg != null ? this._formatRawPayloadValue(position.longitude_deg) : null);
+      addMetric('Yaw', attitude.yaw_deg != null ? `${Math.round(attitude.yaw_deg)}°` : null);
+      if (battery.remaining_percent != null) {
+        const pct = battery.remaining_percent > 1 ? battery.remaining_percent : battery.remaining_percent * 100;
+        addMetric('Battery', `${Math.round(pct)}%`);
+      }
+      return { title: 'WebSocket telemetry packet', metrics };
+    }
+
+    const titles = {
+      'demo.launch': 'Demo stream started',
+      'ws.open': 'WebSocket connected',
+      'ws.close': 'WebSocket closed',
+      'ws.error': 'WebSocket error',
+      'ws.parse_error': 'Message parse error',
+      'mission.complete': 'Mission completed'
+    };
+    return { title: titles[item.channel] || 'Stream event', metrics };
+  },
+
+  _renderRawStreamEntry(item) {
+    const stamp = new Date(item.time).toLocaleTimeString([], {
+      hour12: false,
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    });
+    const presentation = this._getRawStreamPresentation(item);
+    const entry = document.createElement('div');
+    entry.className = `dv-raw-entry type-${item.channel.replace(/[^a-z0-9_-]/gi, '-')}`;
+
+    const head = document.createElement('div');
+    head.className = 'dv-raw-entry-head';
+    const title = document.createElement('div');
+    title.className = 'dv-raw-entry-title';
+    const channel = document.createElement('span');
+    channel.textContent = item.channel;
+    const label = document.createElement('strong');
+    label.textContent = presentation.title;
+    title.append(channel, label);
+    const time = document.createElement('time');
+    time.textContent = stamp;
+    head.append(title, time);
+    entry.append(head);
+
+    if (presentation.metrics.length) {
+      const metrics = document.createElement('div');
+      metrics.className = 'dv-raw-entry-metrics';
+      presentation.metrics.forEach(([key, value]) => {
+        const metric = document.createElement('span');
+        const k = document.createElement('small');
+        k.textContent = key;
+        const v = document.createElement('b');
+        v.textContent = value;
+        metric.append(k, v);
+        metrics.append(metric);
+      });
+      entry.append(metrics);
+    }
+
+    const fields = this._flattenRawPayload(item.payload);
+    if (fields.length) {
+      const table = document.createElement('div');
+      table.className = 'dv-raw-entry-fields';
+      fields.forEach(([key, value]) => {
+        const row = document.createElement('div');
+        const k = document.createElement('span');
+        k.textContent = key;
+        const v = document.createElement('code');
+        v.textContent = value;
+        row.append(k, v);
+        table.append(row);
+      });
+      entry.append(table);
+    }
+    return entry;
+  },
+
+  _scheduleRawStreamRender() {
+    if (this._graphsMode !== 'raw') return;
+    if (this._rawLogRenderFrame) return;
+    this._rawLogRenderFrame = requestAnimationFrame(() => {
+      this._rawLogRenderFrame = null;
+      this._renderRawStreamLog(this._getActiveDrone());
+    });
+  },
+
+  _renderRawStreamLog(entry = this._getActiveDrone()) {
+    const d = this._getDom();
+    if (!d.rawStreamLog) return;
+    const logs = entry?.rawStreamLog || [];
+    const count = logs.length;
+    if (d.rawStreamMeta) {
+      d.rawStreamMeta.textContent = `${count} entr${count === 1 ? 'y' : 'ies'}${count >= RAW_STREAM_LOG_LIMIT ? ' (capped)' : ''}`;
+    }
+    d.rawStreamLog.textContent = '';
+    if (count) {
+      const fragment = document.createDocumentFragment();
+      logs.forEach(item => fragment.append(this._renderRawStreamEntry(item)));
+      d.rawStreamLog.append(fragment);
+    } else {
+      d.rawStreamLog.textContent = 'No stream logs captured yet.';
+    }
+    d.rawStreamLog.scrollTop = d.rawStreamLog.scrollHeight;
+  },
+
+  _initGraphCharts() {
+    if (this._graphCharts.size || typeof Chart === 'undefined') return;
+    const gridColor = 'rgba(255,255,255,0.06)';
+    const tickColor = 'rgba(255,255,255,0.35)';
+
+    Object.entries(GRAPH_WIDGETS).forEach(([id, def]) => {
+      const canvas = document.getElementById(def.canvasId);
+      if (!canvas) return;
+      const yScale = {
+        grid: { color: gridColor, drawBorder: false },
+        border: { display: false },
+        ticks: { color: tickColor, maxTicksLimit: 4, font: { size: 9 } }
+      };
+      if (Number.isFinite(def.min)) yScale.min = def.min;
+      if (Number.isFinite(def.max)) yScale.max = def.max;
+      if (Number.isFinite(def.suggestedMin)) yScale.suggestedMin = def.suggestedMin;
+
+      const chart = new Chart(canvas, {
+        type: 'line',
+        data: {
+          labels: [],
+          datasets: [{
+            label: def.label,
+            data: [],
+            borderColor: def.color,
+            backgroundColor: (ctx) => {
+              const { chart } = ctx;
+              const area = chart.chartArea;
+              if (!area) return `${def.color}18`;
+              const gradient = chart.ctx.createLinearGradient(0, area.top, 0, area.bottom);
+              gradient.addColorStop(0, `${def.color}2e`);
+              gradient.addColorStop(0.72, `${def.color}08`);
+              gradient.addColorStop(1, `${def.color}00`);
+              return gradient;
+            },
+            borderWidth: 2.2,
+            cubicInterpolationMode: 'monotone',
+            pointRadius: (ctx) => ctx.dataIndex === ctx.dataset.data.length - 1 ? 2.5 : 0,
+            pointHoverRadius: 4,
+            pointBackgroundColor: def.color,
+            pointBorderColor: 'rgba(8, 12, 20, 0.95)',
+            pointBorderWidth: 1.5,
+            tension: 0.34,
+            fill: 'origin'
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          normalized: true,
+          interaction: { intersect: false, mode: 'index' },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: 'rgba(12, 15, 24, 0.92)',
+              borderColor: 'rgba(255,255,255,0.1)',
+              borderWidth: 1,
+              displayColors: false,
+              titleFont: { size: 11, weight: '600' },
+              bodyFont: { size: 11 },
+              padding: 9,
+              cornerRadius: 8,
+              callbacks: {
+                label: (ctx) => `${ctx.parsed.y} ${def.unit}`
+              }
+            }
+          },
+          scales: {
+            x: {
+              border: { display: false },
+              grid: { display: false },
+              ticks: { color: tickColor, maxTicksLimit: 5, font: { size: 9 } }
+            },
+            y: yScale
+          }
+        }
+      });
+      this._graphCharts.set(id, chart);
+    });
+  },
+
+  _updateGraphs(entry) {
+    const d = this._getDom();
+    if (!d.graphsDrawer) return;
+    const samples = this._getGraphSource(entry);
+    const sampleText = `${samples.length} sample${samples.length === 1 ? '' : 's'}`;
+    if (d.graphsMeta) d.graphsMeta.textContent = sampleText;
+    if (d.graphsSampleCount) d.graphsSampleCount.textContent = String(samples.length);
+    if (d.graphsActiveCount) d.graphsActiveCount.textContent = String(this._visibleGraphWidgets.size);
+    if (d.graphsWindow) {
+      const first = samples[0]?.t || 0;
+      const last = samples[samples.length - 1]?.t || 0;
+      d.graphsWindow.textContent = samples.length > 1 ? this._fmtElapsed(Math.max(0, last - first)) : '00:00';
+    }
+    if (d.graphsSubtitle) {
+      d.graphsSubtitle.textContent = entry
+        ? `${entry.name}${entry.model ? ' — ' + entry.model : ''}`
+        : 'Select a drone to populate realtime widgets';
+    }
+    if (!this._graphsOpen && this._graphCharts.size === 0) {
+      this._updateGraphCurrentValues(entry);
+      return;
+    }
+
+    this._initGraphCharts();
+    Object.keys(GRAPH_WIDGETS).forEach(id => {
+      const chart = this._graphCharts.get(id);
+      if (!chart) return;
+      const series = this._getGraphSeries(entry, id);
+      chart.data.labels = series.labels;
+      chart.data.datasets[0].data = series.values;
+      chart.update('none');
+    });
+    this._updateGraphCurrentValues(entry);
+  },
+
+  _getGraphSource(entry) {
+    if (!entry) return [];
+    if (Array.isArray(entry.track) && entry.track.length) return entry.track;
+    const t = entry.telemetry || {};
+    if (typeof t.lat !== 'number' || typeof t.lng !== 'number') return [];
+    return [{
+      t: entry.missionStartTime ? Date.now() - entry.missionStartTime : 0,
+      lat: t.lat,
+      lng: t.lng,
+      alt: Math.round(t.altitude || 0),
+      speed: Number.parseFloat(t.speed) || 0,
+      heading: Math.round(t.heading || 0),
+      battery: Math.round(t.battery ?? 100)
+    }];
+  },
+
+  _getGraphSeries(entry, id) {
+    const source = this._getGraphSource(entry);
+    const labels = [];
+    let values = [];
+
+    if (id === 'distance') {
+      let cumulative = 0;
+      values = source.map((point, i) => {
+        if (i > 0) {
+          const prev = source[i - 1];
+          cumulative += this._computeTrackDistance([prev, point]);
+        }
+        return Math.round(cumulative);
+      });
+    } else if (id === 'verticalRate') {
+      values = source.map((point, i) => {
+        if (i === 0) return 0;
+        const prev = source[i - 1];
+        const dt = Math.max(1, ((point.t || 0) - (prev.t || 0)) / 1000);
+        return +(((point.alt || 0) - (prev.alt || 0)) / dt).toFixed(1);
+      });
+    } else {
+      const key = id === 'altitude' ? 'alt' : id;
+      values = source.map(point => {
+        const value = Number(point[key]);
+        return Number.isFinite(value) ? value : 0;
+      });
+    }
+
+    const maxPoints = 160;
+    const start = Math.max(0, source.length - maxPoints);
+    source.slice(start).forEach(point => labels.push(this._fmtElapsed(point.t || 0)));
+    return { labels, values: values.slice(start) };
+  },
+
+  _formatGraphDelta(id, delta) {
+    if (!Number.isFinite(delta) || Math.abs(delta) < 0.05) {
+      return { text: 'No change', className: 'neutral' };
+    }
+    const abs = Math.abs(delta);
+    const sign = delta > 0 ? '+' : '-';
+    let value;
+    let unit = GRAPH_WIDGETS[id]?.unit || '';
+
+    if (id === 'battery') {
+      value = Math.round(abs);
+      unit = '%';
+      return { text: `${sign}${value}${unit}`, className: delta > 0 ? 'positive' : 'negative' };
+    }
+    if (id === 'heading') {
+      value = Math.round(abs);
+      return { text: `${sign}${value}°`, className: delta > 0 ? 'positive' : 'negative' };
+    }
+    if (id === 'distance' && abs >= 1000) {
+      value = (abs / 1000).toFixed(2);
+      unit = 'km';
+    } else if (id === 'altitude' || id === 'distance') {
+      value = Math.round(abs);
+    } else {
+      value = abs.toFixed(1);
+    }
+
+    return { text: `${sign}${value} ${unit}`.trim(), className: delta > 0 ? 'positive' : 'negative' };
+  },
+
+  _updateGraphCurrentValues(entry) {
+    const d = this._getDom();
+    if (!d.graphsGrid) return;
+    const source = this._getGraphSource(entry);
+    const last = source[source.length - 1] || null;
+    const valueFor = {
+      altitude: last ? `${Math.round(last.alt || 0)} m` : '-- m',
+      speed: last ? `${Number(last.speed || 0).toFixed(1)} km/h` : '-- km/h',
+      battery: last ? `${Math.round(last.battery ?? 0)}%` : '--%',
+      heading: last ? `${Math.round(last.heading || 0)}°` : '--°',
+      verticalRate: '-- m/s',
+      distance: '-- m'
+    };
+    const deltaFor = Object.fromEntries(Object.keys(GRAPH_WIDGETS).map(id => [id, { text: 'No change', className: 'neutral' }]));
+    if (last && source.length > 1) {
+      const vertical = this._getGraphSeries(entry, 'verticalRate').values.at(-1);
+      const distance = this._getGraphSeries(entry, 'distance').values.at(-1);
+      valueFor.verticalRate = `${Number(vertical || 0).toFixed(1)} m/s`;
+      valueFor.distance = distance >= 1000 ? `${(distance / 1000).toFixed(2)} km` : `${Math.round(distance || 0)} m`;
+      Object.keys(GRAPH_WIDGETS).forEach(id => {
+        const values = this._getGraphSeries(entry, id).values;
+        const current = values.at(-1);
+        const previous = values.at(-2);
+        deltaFor[id] = this._formatGraphDelta(id, Number(current) - Number(previous));
+      });
+    }
+    d.graphsGrid.querySelectorAll('[data-graph-value]').forEach(el => {
+      const id = el.dataset.graphValue;
+      el.textContent = valueFor[id] || '--';
+    });
+    d.graphsGrid.querySelectorAll('[data-graph-delta]').forEach(el => {
+      const delta = deltaFor[el.dataset.graphDelta] || { text: 'No change', className: 'neutral' };
+      el.textContent = delta.text;
+      el.classList.toggle('positive', delta.className === 'positive');
+      el.classList.toggle('negative', delta.className === 'negative');
+    });
+  },
+
   // ══════════════════════════════════════════
   //  DRONE SELECTION & CHIPS
   // ══════════════════════════════════════════
@@ -1105,6 +1790,9 @@ export const DroneView = {
     this._updateProgress(entry);
     this._renderWaypointList(entry);
     this._updateWaypointStatuses(entry);
+    this._updateMissionCompleteControl(entry);
+    this._updateGraphs(entry);
+    if (this._graphsMode === 'raw') this._renderRawStreamLog(entry);
 
     // Highlight chip
     this._highlightChip(droneId);
@@ -1188,6 +1876,9 @@ export const DroneView = {
         this._selectDrone(remaining[0]);
       } else {
         this._activeDroneId = null;
+        this._updateMissionCompleteControl(null);
+        this._updateGraphs(null);
+        if (this._graphsMode === 'raw') this._renderRawStreamLog(null);
         // Show interstitial again
         this._showInterstitial();
         this._populateDroneSelect();
@@ -1213,7 +1904,12 @@ export const DroneView = {
     entry.flightLog = [
       { time: new Date().toISOString(), event: 'launch', detail: 'Drone powered up and launched from base' }
     ];
+    entry.track = [];
+    entry.trackSampleTime = 0;
+    entry.rawStreamLog = [];
+    entry._persisted = false;
     if (entry.trailPolyline) entry.trailPolyline.setPath([]);
+    this._appendRawStreamLog(entry, 'demo.launch', { droneId: entry.id, waypoints: entry.waypoints.length });
 
     const stepsPerSegment = 600;
     const intervalMs = 100;
@@ -1262,8 +1958,23 @@ export const DroneView = {
         lat, lng
       };
 
+      this._recordTrackSample(entry, { lat, lng, alt, speed: +baseSpeed.toFixed(1), heading: hdg, battery: batt });
+      this._appendRawStreamLog(entry, 'demo.telemetry', {
+        altitude: Math.round(alt),
+        speed: +baseSpeed.toFixed(1),
+        heading: Math.round(hdg),
+        battery: Math.round(batt),
+        lat,
+        lng,
+        segment: entry.simIndex,
+        fraction: +entry.simFraction.toFixed(4)
+      });
+
       const pos = { lat, lng };
-      if (entry.droneMarker) entry.droneMarker.setPosition(pos);
+      if (entry.droneMarker) {
+        entry.droneMarker.setPosition(pos);
+        entry.droneMarker.setHeading?.(hdg);
+      }
       if (entry.trailPolyline) {
         const path = entry.trailPolyline.getPath();
         path.push(new google.maps.LatLng(lat, lng));
@@ -1299,58 +2010,177 @@ export const DroneView = {
     }
   },
 
-  _completeMission(entry) {
-    this._stopSimulation(entry);
-    entry.missionComplete = true;
+  // Record a sampled telemetry point for replay (throttled to ~1/sec).
+  _recordTrackSample(entry, { lat, lng, alt, speed, heading, battery }) {
+    if (typeof lat !== 'number' || typeof lng !== 'number') return;
+    const now = Date.now();
+    if (entry.trackSampleTime && now - entry.trackSampleTime < 1000) return;
+    entry.trackSampleTime = now;
+    if (!entry.track) entry.track = [];
+    entry.track.push({
+      t: entry.missionStartTime ? now - entry.missionStartTime : 0,
+      lat,
+      lng,
+      alt: Math.round(alt || 0),
+      speed: +(+speed || 0).toFixed(1),
+      heading: Math.round(heading || 0),
+      battery: Math.round(battery ?? 100)
+    });
+    // Safety cap so very long flights don't grow unbounded (~2h at 1Hz).
+    if (entry.track.length > 7200) entry.track.shift();
+  },
 
-    const wps = entry.waypoints;
-    const elapsed = Date.now() - entry.missionStartTime;
-    const durationMin = Math.round(elapsed / 60000);
-    const durationStr = durationMin < 1 ? '<1 min' : durationMin + ' min';
+  // Persist a completed/snapshot flight to the local database for history & replay.
+  async _persistFlight(flightData) {
+    try {
+      if (window.helios?.flightSave) {
+        await window.helios.flightSave(flightData);
+      }
+    } catch (err) {
+      console.error('[DroneView] Failed to persist flight:', err);
+    }
+  },
 
+  _formatMissionDuration(ms) {
+    if (!ms || ms < 60000) return '<1 min';
+    const totalMin = Math.round(ms / 60000);
+    if (totalMin < 60) return `${totalMin} min`;
+    const h = Math.floor(totalMin / 60);
+    const m = totalMin % 60;
+    return m ? `${h} hr ${m} min` : `${h} hr`;
+  },
+
+  _formatMissionDistance(meters) {
+    return meters >= 1000 ? `${(meters / 1000).toFixed(1)} km` : `${Math.round(meters)} m`;
+  },
+
+  _computeRouteDistance(wps) {
     let totalDist = 0;
     for (let i = 1; i < wps.length; i++) {
       totalDist += haversine(wps[i - 1].lat, wps[i - 1].lng, wps[i].lat, wps[i].lng);
     }
-    const distanceStr = totalDist >= 1000 ? (totalDist / 1000).toFixed(1) + ' km' : Math.round(totalDist) + ' m';
-    const batteryLeft = Math.round(entry.telemetry.battery) + '%';
+    return totalDist;
+  },
 
-    entry.flightLog.push({ time: new Date().toISOString(), event: 'land', detail: 'Drone landed safely at launch site' });
+  _computeTrackDistance(track) {
+    if (!Array.isArray(track) || track.length < 2) return 0;
+    let totalDist = 0;
+    for (let i = 1; i < track.length; i++) {
+      const prev = track[i - 1];
+      const cur = track[i];
+      if (typeof prev.lat === 'number' && typeof prev.lng === 'number' && typeof cur.lat === 'number' && typeof cur.lng === 'number') {
+        totalDist += haversine(prev.lat, prev.lng, cur.lat, cur.lng);
+      }
+    }
+    return totalDist;
+  },
 
-    // Show completion overlay only if this is the active drone
-    if (entry.id === this._activeDroneId) {
-      const d = this._getDom();
-      d.mcDuration.textContent = durationStr;
-      d.mcDistance.textContent = distanceStr;
-      d.mcBattery.textContent = batteryLeft;
-      d.missionCompleteOverlay.classList.add('visible');
-      this._updateProgress(entry);
-      this._updateWaypointStatuses(entry);
+  _getVisitedWaypointCount(entry, status = null) {
+    const total = entry.waypoints?.length || 0;
+    if (status === 'complete' || entry.missionComplete) return total;
+    if (entry.mode === 'live') return entry.visitedWaypoints?.size || 0;
+    return total ? Math.min(total, (entry.simIndex || 0) + 1) : 0;
+  },
+
+  _buildFlightSnapshot(entry, { status = null, endTime = Date.now() } = {}) {
+    const t = entry.telemetry || {};
+    const wps = entry.waypoints || [];
+    const track = entry.track || [];
+    const missionStatus = status || (entry.missionComplete ? 'complete' : 'in-progress');
+    const elapsed = entry.missionStartTime ? Math.max(0, endTime - entry.missionStartTime) : 0;
+    const routeDist = this._computeRouteDistance(wps);
+    const trackDist = this._computeTrackDistance(track);
+    const totalDist = trackDist > 0 ? trackDist : routeDist;
+    const speedSamples = track.map(p => Number(p.speed)).filter(v => Number.isFinite(v) && v > 0);
+    const currentSpeed = Number.parseFloat(t.speed) || 0;
+    const avgSpeed = speedSamples.length
+      ? +(speedSamples.reduce((sum, v) => sum + v, 0) / speedSamples.length).toFixed(1)
+      : +(currentSpeed * 0.85).toFixed(1);
+    const maxSpeed = speedSamples.length ? +Math.max(...speedSamples).toFixed(1) : +(currentSpeed * 1.15).toFixed(1);
+    const altitudeValues = [
+      ...wps.map(w => Number(w.alt)).filter(Number.isFinite),
+      ...track.map(p => Number(p.alt)).filter(Number.isFinite),
+      Number(t.altitude)
+    ].filter(Number.isFinite);
+
+    return {
+      droneModel: `${entry.name}${entry.model ? ' \u2014 ' + entry.model : ''}`,
+      droneId: entry.fleetId ? `ID-${entry.fleetId}` : entry.id,
+      missionStart: entry.missionStartTime ? new Date(entry.missionStartTime).toISOString() : new Date(endTime).toISOString(),
+      missionEnd: new Date(endTime).toISOString(),
+      missionStatus,
+      durationMs: elapsed,
+      durationStr: this._formatMissionDuration(elapsed),
+      totalDistanceM: totalDist,
+      distanceStr: this._formatMissionDistance(totalDist),
+      batteryStart: 100,
+      batteryEnd: Math.round(t.battery ?? 100),
+      waypointsVisited: this._getVisitedWaypointCount(entry, missionStatus),
+      waypointsTotal: wps.length,
+      maxAltitude: altitudeValues.length ? Math.max(...altitudeValues) : 0,
+      avgSpeed,
+      maxSpeed,
+      weatherSummary: this._getDom().weatherCondition?.textContent || 'Unknown',
+      flightLog: [...(entry.flightLog || [])],
+      waypoints: wps.map(w => ({ ...w })),
+      telemetrySnapshot: { ...t },
+      track: track.map(p => ({ ...p }))
+    };
+  },
+
+  _showMissionCompleteOverlay(entry, flightData) {
+    if (entry.id !== this._activeDroneId) return;
+    const d = this._getDom();
+    d.mcDuration.textContent = flightData.durationStr;
+    d.mcDistance.textContent = flightData.distanceStr;
+    d.mcBattery.textContent = `${flightData.batteryEnd}%`;
+    d.missionCompleteOverlay.classList.add('visible');
+    this._updateProgress(entry);
+    this._updateWaypointStatuses(entry);
+  },
+
+  _completeMission(entry, { source = 'auto' } = {}) {
+    if (!entry) return;
+    if (entry.missionComplete) {
+      this._showMissionCompleteOverlay(entry, this._buildFlightSnapshot(entry, { status: 'complete' }));
+      return;
     }
 
+    const endTime = Date.now();
+    if (!entry.missionStartTime) entry.missionStartTime = endTime;
+    if (!entry.flightLog?.length) {
+      entry.flightLog = [{ time: new Date(entry.missionStartTime).toISOString(), event: 'launch', detail: 'Mission tracking started' }];
+    }
+
+    this._stopSimulation(entry);
+    entry.missionComplete = true;
+
+    if (entry.mode === 'live') {
+      entry.waypoints.forEach((_, i) => entry.visitedWaypoints.add(i));
+      this._disconnectWebSocket(entry);
+    }
+
+    const detail = source === 'manual'
+      ? 'Mission marked complete by operator'
+      : 'Drone landed safely at launch site';
+    const lastEvent = entry.flightLog?.[entry.flightLog.length - 1]?.event;
+    if (lastEvent !== 'land') {
+      entry.flightLog.push({ time: new Date(endTime).toISOString(), event: 'land', detail });
+    }
+    this._appendRawStreamLog(entry, 'mission.complete', { source, status: 'complete' });
+
+    const flightData = this._buildFlightSnapshot(entry, { status: 'complete', endTime });
+
     // Store in shared state for Reports
-    state.flightData = {
-      droneModel: `${entry.name}${entry.model ? ' — ' + entry.model : ''}`,
-      droneId: entry.fleetId ? `ID-${entry.fleetId}` : entry.id,
-      missionStart: new Date(entry.missionStartTime).toISOString(),
-      missionEnd: new Date().toISOString(),
-      missionStatus: 'complete',
-      durationMs: elapsed,
-      durationStr,
-      totalDistanceM: totalDist,
-      distanceStr,
-      batteryStart: 100,
-      batteryEnd: Math.round(entry.telemetry.battery),
-      waypointsVisited: wps.length,
-      waypointsTotal: wps.length,
-      maxAltitude: Math.max(...wps.map(w => w.alt)),
-      avgSpeed: +(42 + Math.random() * 6).toFixed(1),
-      maxSpeed: +(48 + Math.random() * 8).toFixed(1),
-      weatherSummary: this._getDom().weatherCondition?.textContent || 'Unknown',
-      flightLog: [...entry.flightLog],
-      waypoints: wps.map(w => ({ ...w })),
-      telemetrySnapshot: { ...entry.telemetry }
-    };
+    state.flightData = flightData;
+    this._showMissionCompleteOverlay(entry, flightData);
+    this._updateMissionCompleteControl(entry);
+    this._updateGraphs(entry);
+
+    if (!entry._persisted) {
+      entry._persisted = true;
+      this._persistFlight(flightData);
+    }
   },
 
   // ══════════════════════════════════════════
@@ -1377,7 +2207,12 @@ export const DroneView = {
         entry.flightLog = [
           { time: new Date().toISOString(), event: 'launch', detail: 'Live telemetry stream started' }
         ];
+        entry.track = [];
+        entry.trackSampleTime = 0;
+        entry.rawStreamLog = [];
+        entry._persisted = false;
         if (entry.trailPolyline) entry.trailPolyline.setPath([]);
+        this._appendRawStreamLog(entry, 'ws.open', { url, subscribe: ['all'] });
       };
 
       entry.ws.onmessage = (event) => {
@@ -1385,20 +2220,23 @@ export const DroneView = {
           const data = JSON.parse(event.data);
           this._onWsMessage(entry, data);
         } catch (e) {
+          this._appendRawStreamLog(entry, 'ws.parse_error', { raw: event.data, error: e.message });
           console.warn(`[DroneView] Failed to parse WS message for ${entry.name}:`, e);
         }
       };
 
       entry.ws.onclose = (event) => {
         console.log(`[DroneView] WebSocket closed for ${entry.name}:`, event.code, event.reason);
+        this._appendRawStreamLog(entry, 'ws.close', { code: event.code, reason: event.reason || null });
         entry.ws = null;
-        if (entry.mode === 'live' && this._drones.has(entry.id) && state.activePage === 'droneview') {
+        if (entry.mode === 'live' && !entry.missionComplete && this._drones.has(entry.id) && state.activePage === 'droneview') {
           entry.wsReconnectTimer = setTimeout(() => this._connectWebSocket(entry), 3000);
         }
       };
 
       entry.ws.onerror = (error) => {
         console.error(`[DroneView] WebSocket error for ${entry.name}:`, error);
+        this._appendRawStreamLog(entry, 'ws.error', { message: error?.message || 'WebSocket error' });
         if (entry.id === this._activeDroneId) {
           this._showError(`WebSocket to ${entry.hostname}:5000 failed. Is the Helios SBC Service running?`);
         }
@@ -1422,6 +2260,7 @@ export const DroneView = {
 
   _onWsMessage(entry, data) {
     const now = Date.now();
+    this._appendRawStreamLog(entry, 'ws.message', data);
 
     if (data.position) {
       const lat = data.position.latitude_deg;
@@ -1446,7 +2285,13 @@ export const DroneView = {
       entry.lastWsPosition = { lat, lng };
       entry.lastWsTime = now;
 
-      if (entry.droneMarker) entry.droneMarker.setPosition({ lat, lng });
+      if (entry.droneMarker) {
+        entry.droneMarker.setPosition({ lat, lng });
+        const hdg = (data.attitude && typeof data.attitude.yaw_deg === 'number')
+          ? data.attitude.yaw_deg
+          : entry.telemetry.heading;
+        entry.droneMarker.setHeading?.(hdg);
+      }
 
       if (entry.trailPolyline && now - entry.trailThrottleTime > 1000) {
         const path = entry.trailPolyline.getPath();
@@ -1485,6 +2330,15 @@ export const DroneView = {
       const pct = data.battery.remaining_percent;
       entry.telemetry.battery = pct > 1 ? Math.round(pct) : Math.round(pct * 100);
     }
+
+    this._recordTrackSample(entry, {
+      lat: entry.telemetry.lat,
+      lng: entry.telemetry.lng,
+      alt: entry.telemetry.altitude,
+      speed: entry.telemetry.speed,
+      heading: entry.telemetry.heading,
+      battery: entry.telemetry.battery
+    });
 
     // Only update panel if active
     if (entry.id === this._activeDroneId) {
@@ -1547,6 +2401,8 @@ export const DroneView = {
     const bPct = Math.round(t.battery);
     d.batteryFill.style.width = bPct + '%';
     d.batteryFill.className = 'dv-battery-fill ' + (bPct > 50 ? 'high' : bPct > 20 ? 'medium' : 'low');
+    this._updateMissionCompleteControl(entry);
+    this._updateGraphs(entry);
   },
 
   _updateProgress(entry) {
@@ -1694,12 +2550,6 @@ export const DroneView = {
     if (!entry) return;
 
     const d = this._getDom();
-    const apiKey = await getGeminiApiKey();
-    if (!apiKey) {
-      this._showError('Gemini API key not configured. Add GEMINI_API_KEY to .env and restart.');
-      return;
-    }
-
     d.btnFlightAnalysis.classList.add('loading');
     d.loadingOverlay.classList.add('visible');
 
@@ -1740,7 +2590,7 @@ Provide a JSON response with EXACTLY this structure (no markdown, no code fences
   "alerts": ["<any urgent alerts, or empty array>"]
 }`;
 
-      const result = await callGemini(apiKey, prompt);
+      const result = await callAI(prompt);
       d.loadingOverlay.classList.remove('visible');
       d.btnFlightAnalysis.classList.remove('loading');
       this._showAnalysisPanel(result);
@@ -1798,12 +2648,6 @@ Provide a JSON response with EXACTLY this structure (no markdown, no code fences
     if (!entry) return;
 
     const d = this._getDom();
-    const apiKey = await getGeminiApiKey();
-    if (!apiKey) {
-      this._showError('Gemini API key not configured. Add GEMINI_API_KEY to .env and restart.');
-      return;
-    }
-
     d.btnAltRoutes.classList.add('loading');
     d.loadingOverlay.classList.add('visible');
 
@@ -1847,7 +2691,7 @@ RULES:
 - 3-5 waypoints per alternative route
 - Altitudes between 30-120m`;
 
-      const result = await callGemini(apiKey, prompt);
+      const result = await callAI(prompt);
       d.loadingOverlay.classList.remove('visible');
       d.btnAltRoutes.classList.remove('loading');
       if (result.alternatives && result.alternatives.length > 0) {
@@ -1956,19 +2800,7 @@ RULES:
         return;
       }
 
-      const t = entry.telemetry || {};
       const wps = entry.waypoints || [];
-      const now = Date.now();
-      const elapsed = entry.missionStartTime ? now - entry.missionStartTime : 0;
-      const durationMin = Math.round(elapsed / 60000);
-      const durationStr = durationMin < 1 ? '<1 min' : durationMin + ' min';
-
-      // Calculate total route distance
-      let totalDist = 0;
-      for (let i = 1; i < wps.length; i++) {
-        totalDist += haversine(wps[i - 1].lat, wps[i - 1].lng, wps[i].lat, wps[i].lng);
-      }
-      const distanceStr = totalDist >= 1000 ? (totalDist / 1000).toFixed(1) + ' km' : Math.round(totalDist) + ' m';
 
       // Determine mission status
       let missionStatus;
@@ -1982,15 +2814,6 @@ RULES:
         missionStatus = `in-progress (${pct}%)`;
       }
 
-      // Compute altitude safely (avoid Math.max with empty spread)
-      const altitudes = wps.map(w => w.alt).filter(a => typeof a === 'number');
-      const maxAlt = altitudes.length > 0 ? Math.max(...altitudes) : Math.round(t.altitude || 0);
-
-      // Compute speed values
-      const speedNum = parseFloat(t.speed) || 0;
-      const avgSpeed = +(speedNum * 0.85).toFixed(1);
-      const maxSpeed = +(speedNum * 1.15).toFixed(1);
-
       const d = this._getDom();
 
       // Hide the mission-complete overlay if it's showing
@@ -1998,28 +2821,13 @@ RULES:
         d.missionCompleteOverlay.classList.remove('visible');
       }
 
-      state.flightData = {
-        droneModel: `${entry.name}${entry.model ? ' \u2014 ' + entry.model : ''}`,
-        droneId: entry.fleetId ? `ID-${entry.fleetId}` : entry.id,
-        missionStart: entry.missionStartTime ? new Date(entry.missionStartTime).toISOString() : new Date().toISOString(),
-        missionEnd: new Date().toISOString(),
-        missionStatus,
-        durationMs: elapsed,
-        durationStr,
-        totalDistanceM: totalDist,
-        distanceStr,
-        batteryStart: 100,
-        batteryEnd: Math.round(t.battery ?? 100),
-        waypointsVisited: entry.mode === 'demo' ? (entry.simIndex || 0) + 1 : (entry.visitedWaypoints?.size || 0),
-        waypointsTotal: wps.length,
-        maxAltitude: maxAlt,
-        avgSpeed,
-        maxSpeed,
-        weatherSummary: d.weatherCondition?.textContent || 'Unknown',
-        flightLog: [...(entry.flightLog || [])],
-        waypoints: wps.map(w => ({ ...w })),
-        telemetrySnapshot: { ...t }
-      };
+      state.flightData = this._buildFlightSnapshot(entry, { status: missionStatus });
+
+      // Only persist a completed mission once (in-progress reports stay ephemeral).
+      if (entry.missionComplete && !entry._persisted) {
+        entry._persisted = true;
+        this._persistFlight(state.flightData);
+      }
 
       if (_navigate) {
         _navigate('reports');

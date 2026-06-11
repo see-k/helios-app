@@ -17,10 +17,11 @@ export async function getGeminiApiKey() {
  * Call the Gemini API and return parsed JSON.
  * @param {string} apiKey
  * @param {string} prompt
+ * @param {string} [model] - Gemini model ID (default: 'gemini-2.0-flash')
  * @returns {Promise<object>}
  */
-export async function callGemini(apiKey, prompt) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+export async function callGemini(apiKey, prompt, model = 'gemini-2.0-flash') {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
   const response = await fetch(url, {
     method: 'POST',

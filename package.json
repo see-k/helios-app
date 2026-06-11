@@ -49,6 +49,7 @@
     "electron-builder": "^25.0.0"
   },
   "dependencies": {
+    "@google/model-viewer": "^4.2.0",
     "better-sqlite3": "^12.6.2",
     "chart.js": "^4.5.1",
     "dotenv": "^17.2.4"

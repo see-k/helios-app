@@ -1,0 +1,469 @@
+/* ============================================
+   SETTINGS PAGE
+   Glass morphism design consistent with the
+   rest of the Helios design system.
+   ============================================ */
+
+/* ── Container (full-height scrollable, matches reports pattern) ── */
+.settings-container {
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.08) transparent;
+}
+
+.settings-container::-webkit-scrollbar { width: 6px; }
+.settings-container::-webkit-scrollbar-track { background: transparent; }
+.settings-container::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 3px; }
+
+/* ── Inner page (centered column) ── */
+.settings-page {
+  width: 100%;
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 40px 24px 80px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  position: relative;
+}
+
+/* ── Page Header ── */
+.settings-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.settings-header-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  background: rgba(var(--accent-primary-rgb), 0.1);
+  color: var(--accent-primary);
+  flex-shrink: 0;
+}
+
+.settings-header-icon svg {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.settings-header-text h2 {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+  letter-spacing: 0.3px;
+}
+
+.settings-header-text p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 3px 0 0;
+}
+
+/* ── Section wrapper ── */
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.settings-section-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--accent-primary);
+}
+
+.settings-section-label svg {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex-shrink: 0;
+}
+
+.settings-section-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin: 0;
+}
+
+/* ── Settings Card ── */
+.settings-card {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  box-shadow: var(--glass-shadow), var(--glass-inner-glow);
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    opacity var(--transition-medium),
+    transform var(--transition-medium),
+    max-height var(--transition-medium);
+  overflow: hidden;
+}
+
+.settings-card-hidden {
+  display: none;
+}
+
+.settings-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: 0.2px;
+}
+
+.settings-card-footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-top: 4px;
+  flex-wrap: wrap;
+}
+
+/* ── Provider Tabs ── */
+.settings-provider-tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.settings-provider-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 12px 18px;
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  background: var(--glass-bg);
+  cursor: pointer;
+  transition:
+    border-color var(--transition-fast),
+    background var(--transition-fast),
+    box-shadow var(--transition-fast);
+  min-width: 130px;
+}
+
+.settings-provider-tab:hover {
+  background: var(--glass-bg-hover);
+  border-color: var(--glass-border-hover);
+}
+
+.settings-provider-tab.active {
+  background: rgba(var(--accent-primary-rgb), 0.1);
+  border-color: rgba(var(--accent-primary-rgb), 0.4);
+  box-shadow: 0 0 0 1px rgba(var(--accent-primary-rgb), 0.15);
+}
+
+.spt-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  transition: color var(--transition-fast);
+}
+
+.settings-provider-tab.active .spt-label {
+  color: var(--accent-primary);
+}
+
+.spt-subtitle {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+/* ── Form groups ── */
+.settings-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.3px;
+}
+
+/* ── Text inputs ── */
+.settings-input {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  background: rgba(255,255,255,0.04);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: var(--font-primary);
+  outline: none;
+  transition:
+    border-color var(--transition-fast),
+    background var(--transition-fast),
+    box-shadow var(--transition-fast);
+  box-sizing: border-box;
+}
+
+.settings-input:focus {
+  border-color: rgba(var(--accent-primary-rgb), 0.5);
+  background: rgba(255,255,255,0.06);
+  box-shadow: 0 0 0 3px rgba(var(--accent-primary-rgb), 0.08);
+}
+
+.settings-input::placeholder {
+  color: var(--text-tertiary);
+}
+
+/* Row wrapping an input with an icon button (e.g., show/hide API key) */
+.settings-input-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.settings-input-row .settings-input {
+  flex: 1;
+}
+
+.settings-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  background: var(--glass-bg);
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    background var(--transition-fast),
+    color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.settings-icon-btn:hover {
+  background: var(--glass-bg-hover);
+  color: var(--text-primary);
+  border-color: var(--glass-border-hover);
+}
+
+/* ── Select wrapper (with custom chevron) ── */
+.settings-select-wrap {
+  position: relative;
+}
+
+.settings-select {
+  width: 100%;
+  padding: 10px 36px 10px 14px;
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  background: rgba(255,255,255,0.04);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: var(--font-primary);
+  outline: none;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  transition:
+    border-color var(--transition-fast),
+    background var(--transition-fast),
+    box-shadow var(--transition-fast);
+  box-sizing: border-box;
+}
+
+.settings-select:focus {
+  border-color: rgba(var(--accent-primary-rgb), 0.5);
+  background: rgba(255,255,255,0.06);
+  box-shadow: 0 0 0 3px rgba(var(--accent-primary-rgb), 0.08);
+}
+
+.settings-select-chevron {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-tertiary);
+  pointer-events: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Row with select + refresh button side by side */
+.settings-model-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+/* ── Hint text ── */
+.settings-hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.settings-hint code,
+.settings-hint strong {
+  font-family: 'SF Mono', 'Fira Code', 'Fira Mono', Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  background: rgba(255,255,255,0.06);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+/* ── Buttons ── */
+.settings-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 16px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: var(--font-primary);
+  cursor: pointer;
+  border: 1px solid var(--glass-border);
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast),
+    box-shadow var(--transition-fast);
+  white-space: nowrap;
+}
+
+.settings-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.settings-btn-secondary {
+  background: var(--glass-bg);
+  color: var(--text-primary);
+}
+
+.settings-btn-secondary:not(:disabled):hover {
+  background: var(--glass-bg-hover);
+  border-color: var(--glass-border-hover);
+}
+
+.settings-btn-icon {
+  background: var(--glass-bg);
+  color: var(--text-secondary);
+  padding: 10px 12px;
+  gap: 6px;
+}
+
+.settings-btn-icon:not(:disabled):hover {
+  background: var(--glass-bg-hover);
+  color: var(--text-primary);
+  border-color: var(--glass-border-hover);
+}
+
+.settings-btn-icon svg {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex-shrink: 0;
+}
+
+/* ── Status messages ── */
+.settings-status {
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.settings-status-ok {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #22c55e;
+}
+
+.settings-status-ok svg {
+  stroke: #22c55e;
+  flex-shrink: 0;
+}
+
+.settings-status-error {
+  color: #ef4444;
+}
+
+/* ── Save toast (fixed bottom-right) ── */
+.settings-save-toast {
+  position: fixed;
+  bottom: 28px;
+  right: 96px; /* clear of nav-bar */
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 16px;
+  border-radius: 10px;
+  background: rgba(34, 197, 94, 0.12);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  color: #22c55e;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+  opacity: 0;
+  transform: translateY(8px);
+  pointer-events: none;
+  transition:
+    opacity var(--transition-fast),
+    transform var(--transition-fast);
+  z-index: 500;
+}
+
+.settings-save-toast.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.settings-save-toast svg {
+  stroke: #22c55e;
+}
+
+/* ── Light theme overrides ── */
+[data-theme="light"] .settings-input,
+[data-theme="light"] .settings-select {
+  background: rgba(0,0,0,0.03);
+}
+
+[data-theme="light"] .settings-input:focus,
+[data-theme="light"] .settings-select:focus {
+  background: rgba(0,0,0,0.05);
+}
+
+[data-theme="light"] .settings-provider-tab.active {
+  background: rgba(var(--accent-primary-rgb), 0.08);
+}
+
+[data-theme="light"] .settings-hint code,
+[data-theme="light"] .settings-hint strong {
+  background: rgba(0,0,0,0.06);
+}

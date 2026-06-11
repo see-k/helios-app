@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, nativeTheme, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const http = require('http');
 const database = require('./database');
 
 // Load .env from project root
@@ -126,7 +127,6 @@ ipcMain.handle('save-file', async (event, { content, defaultName, filters }) => 
 
 // ── Fleet / Drone connection test ──
 ipcMain.handle('fleet-test-connection', async (event, hostname) => {
-  const http = require('http');
   const url = `http://${hostname}:5000/api/status`;
   return new Promise((resolve) => {
     const req = http.get(url, { timeout: 5000 }, (res) => {
@@ -141,6 +141,59 @@ ipcMain.handle('fleet-test-connection', async (event, hostname) => {
   });
 });
 
+// ── Ollama IPC ──
+ipcMain.handle('ollama-list-models', async (event, baseUrl = 'http://localhost:11434') => {
+  const url = `${baseUrl}/api/tags`;
+  return new Promise((resolve) => {
+    const req = http.get(url, { timeout: 5000 }, (res) => {
+      let body = '';
+      res.on('data', (chunk) => body += chunk);
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(body);
+          const models = (json.models || []).map(m => m.name);
+          resolve({ success: true, models });
+        } catch (_) {
+          resolve({ success: false, models: [], error: 'Failed to parse Ollama response' });
+        }
+      });
+    });
+    req.on('error', (err) => resolve({ success: false, models: [], error: err.message }));
+    req.on('timeout', () => { req.destroy(); resolve({ success: false, models: [], error: 'Connection timed out' }); });
+  });
+});
+
+ipcMain.handle('ollama-generate', async (event, baseUrl = 'http://localhost:11434', model, prompt) => {
+  const postData = JSON.stringify({ model, prompt, stream: false, format: 'json' });
+  const parsedUrl = new URL(`${baseUrl}/api/generate`);
+  const options = {
+    hostname: parsedUrl.hostname,
+    port: parsedUrl.port || 11434,
+    path: parsedUrl.pathname,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(postData) },
+    timeout: 120000
+  };
+  return new Promise((resolve) => {
+    const req = http.request(options, (res) => {
+      let body = '';
+      res.on('data', (chunk) => body += chunk);
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(body);
+          resolve({ success: true, text: json.response || '' });
+        } catch (_) {
+          resolve({ success: false, text: '', error: 'Failed to parse Ollama response' });
+        }
+      });
+    });
+    req.on('error', (err) => resolve({ success: false, text: '', error: err.message }));
+    req.on('timeout', () => { req.destroy(); resolve({ success: false, text: '', error: 'Request timed out' }); });
+    req.write(postData);
+    req.end();
+  });
+});
+
 // ── Fleet / Drone CRUD IPC ──
 ipcMain.handle('fleet-get-all', () => database.getAllDrones());
 ipcMain.handle('fleet-get', (event, id) => database.getDroneById(id));
@@ -148,6 +201,12 @@ ipcMain.handle('fleet-add', (event, data) => database.addDrone(data));
 ipcMain.handle('fleet-update', (event, id, data) => database.updateDrone(id, data));
 ipcMain.handle('fleet-delete', (event, id) => database.deleteDrone(id));
 ipcMain.handle('fleet-ping', (event, id) => database.pingDrone(id));
+
+// ── Flight History IPC ──
+ipcMain.handle('flight-save', (event, data) => database.saveFlight(data));
+ipcMain.handle('flight-get-all', () => database.getAllFlights());
+ipcMain.handle('flight-get', (event, id) => database.getFlightById(id));
+ipcMain.handle('flight-delete', (event, id) => database.deleteFlight(id));
 
 app.whenReady().then(() => {
   database.initDatabase();
